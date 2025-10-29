@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SimpleTv Cast Receiver</title>
+  <meta charset="utf-8">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #000;
+      overflow: hidden;
+    }
+    cast-media-player {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <cast-media-player></cast-media-player>
+  
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+  <script>
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
+    
+    console.log('[SimpleTv Receiver] 🚀 Initializing...');
+    
+    // Intercept LOAD requests to resolve HTTP redirects
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      async (loadRequestData) => {
+        console.log('[SimpleTv] 📡 Load request received');
+        console.log('[SimpleTv] 📺 Original URL:', loadRequestData.media.contentId);
+        
+        const originalUrl = loadRequestData.media.contentId;
+        
+        try {
+          // Fetch the URL to follow any HTTP 302 redirects
+          // The browser will automatically follow redirects
+          const response = await fetch(originalUrl, {
+            method: 'HEAD',  // Use HEAD to avoid downloading content
+            redirect: 'follow'  // Browser follows redirects automatically
+          });
+          
+          // The final URL after all redirects
+          const finalUrl = response.url;
+          
+          console.log('[SimpleTv] ✅ Resolved URL:', finalUrl);
+          console.log('[SimpleTv] 📊 Status:', response.status);
+          console.log('[SimpleTv] 🎵 Content-Type:', response.headers.get('content-type'));
+          
+          // Update the media URL with the resolved URL
+          if (finalUrl !== originalUrl) {
+            console.log('[SimpleTv] 🔄 URL changed after redirect');
+            loadRequestData.media.contentId = finalUrl;
+          } else {
+            console.log('[SimpleTv] ℹ️ No redirect detected');
+          }
+          
+        } catch (error) {
+          console.error('[SimpleTv] ❌ Failed to resolve URL:', error);
+          console.error('[SimpleTv] ⚠️ Will try playing original URL');
+          // Continue with original URL if fetch fails
+        }
+        
+        return loadRequestData;
+      }
+    );
+    
+    // Log playback events for debugging
+    playerManager.addEventListener(
+      cast.framework.events.EventType.ERROR,
+      (event) => {
+        console.error('[SimpleTv] ❌ Playback error:', event);
+      }
+    );
+    
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
+      () => {
+        console.log('[SimpleTv] ✅ Media loaded successfully');
+      }
+    );
+    
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PLAYING,
+      () => {
+        console.log('[SimpleTv] ▶️ Playback started');
+      }
+    );
+    
+    // Configure receiver options
+    const options = new cast.framework.CastReceiverOptions();
+    options.disableIdleTimeout = false;
+    options.maxInactivity = 3600; // 1 hour
+    
+    // Start the receiver
+    context.start(options);
+    console.log('[SimpleTv Receiver] ✅ Started successfully');
+  </script>
+</body>
+</html>
