@@ -9,35 +9,118 @@
         body {
             margin: 0;
             padding: 0;
-            background-color: #000;
+            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 100%);
             overflow: hidden;
+            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
         }
         
         #splash {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             text-align: center;
             color: #fff;
-            font-family: 'Roboto', sans-serif;
+            transition: opacity 0.5s ease-out;
+        }
+        
+        #splash.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .logo-container {
+            margin-bottom: 40px;
+            animation: fadeInScale 1s ease-out;
+        }
+        
+        .app-icon {
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 64px;
+            margin: 0 auto 20px;
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.4);
         }
         
         #splash h1 {
-            font-size: 48px;
-            margin-bottom: 20px;
+            font-size: 56px;
+            font-weight: 700;
+            margin: 0 0 16px 0;
+            letter-spacing: -1px;
+            animation: fadeInUp 0.8s ease-out 0.2s both;
         }
         
         #splash p {
             font-size: 24px;
-            opacity: 0.7;
+            opacity: 0.8;
+            margin: 0;
+            animation: fadeInUp 0.8s ease-out 0.4s both;
+        }
+        
+        .status {
+            margin-top: 40px;
+            font-size: 18px;
+            opacity: 0.6;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes fadeInScale {
+            from {
+                opacity: 0;
+                transform: scale(0.8);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 0.6;
+            }
+            50% {
+                opacity: 1;
+            }
+        }
+        
+        /* Media player styles - shown when content is playing */
+        cast-media-player {
+            --theme-hue: 250;
+            --progress-color: rgba(102, 126, 234, 0.9);
+            --splash-image: none;
         }
     </style>
 </head>
 <body>
     <div id="splash">
-        <h1>📺 SimpleTv</h1>
-        <p>Ready to Cast</p>
+        <div class="logo-container">
+            <div class="app-icon">📺</div>
+            <h1>SimpleTv</h1>
+            <p>Premium IPTV Experience</p>
+        </div>
+        <div class="status">Ready to Cast...</div>
     </div>
 
     <script>
@@ -49,71 +132,73 @@
         
         // Enable all codecs for maximum compatibility
         playbackConfig.manifestRequestHandler = (request) => {
-            console.log('[Receiver] Manifest request:', request.url);
+            console.log('[Receiver] 📡 Manifest request:', request.url);
             
             // Add headers that might be needed by IPTV servers
             request.headers = request.headers || {};
             request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
             request.headers['Accept'] = '*/*';
             request.headers['Origin'] = 'https://supremeiptv.app';
+            request.headers['Connection'] = 'keep-alive';
             
+            console.log('[Receiver] 🔑 Added custom headers for IPTV authentication');
             return request;
         };
 
         // Handle segment requests with custom headers
         playbackConfig.segmentRequestHandler = (request) => {
-            console.log('[Receiver] Segment request:', request.url);
+            console.log('[Receiver] 📦 Segment request:', request.url.substring(0, 100));
             
-            // Add headers for segment requests
+            // Add headers for segment requests (.ts files)
             request.headers = request.headers || {};
             request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
             request.headers['Accept'] = '*/*';
+            request.headers['Connection'] = 'keep-alive';
             
+            return request;
+        };
+        
+        // CRITICAL: Handle direct .ts stream URLs (not HLS)
+        // For direct .ts URLs, we need special handling
+        playbackConfig.licenseRequestHandler = (request) => {
+            console.log('[Receiver] 🔐 License request (shouldn't happen for IPTV):', request.url);
             return request;
         };
 
         playerManager.setPlaybackConfig(playbackConfig);
 
-        // Intercept LOAD requests to modify media info if needed
+        // Intercept LOAD requests to log and add custom handling if needed
         playerManager.setMessageInterceptor(
             cast.framework.messages.MessageType.LOAD,
             (loadRequestData) => {
-                console.log('[Receiver] Load request:', JSON.stringify(loadRequestData, null, 2));
+                console.log('[Receiver] ===== LOAD REQUEST =====');
+                console.log('[Receiver] Full request:', JSON.stringify(loadRequestData, null, 2));
                 
                 const media = loadRequestData.media;
                 if (media && media.contentUrl) {
-                    console.log('[Receiver] Loading:', media.contentUrl);
-                    console.log('[Receiver] Content type:', media.contentType);
+                    console.log('[Receiver] 📡 URL:', media.contentUrl);
+                    console.log('[Receiver] 🎬 Content Type:', media.contentType);
+                    console.log('[Receiver] 📊 Stream Type:', media.streamType);
                     
-                    // Remove query parameters for better extension detection
-                    const urlPath = media.contentUrl.toLowerCase().split('?')[0];
+                    // Don't override content types - let the sender handle it
+                    // The custom headers from manifestRequestHandler and segmentRequestHandler
+                    // will handle IPTV authentication for all stream types
                     
-                    // For MP4 files (VOD - Movies/Series)
+                    const urlPath = media.contentUrl.toLowerCase();
                     if (urlPath.includes('.mp4')) {
-                        // Try standard MP4 MIME type
-                        media.contentType = 'video/mp4';
-                        console.log('[Receiver] 🎥 VOD: Using video/mp4 for MP4 file');
-                        
-                        // Set stream type appropriately
-                        if (!media.streamType) {
-                            media.streamType = cast.framework.messages.StreamType.BUFFERED;
-                        }
+                        console.log('[Receiver] 🎥 Detected: MP4 Video (VOD)');
+                    } else if (urlPath.includes('.m3u8')) {
+                        console.log('[Receiver] 📺 Detected: HLS Stream (Live TV)');
+                    } else if (urlPath.includes('.ts')) {
+                        console.log('[Receiver] 📺 Detected: TS Stream (Live TV)');
+                    } else if (urlPath.includes('.mkv')) {
+                        console.log('[Receiver] 🎬 Detected: MKV Video');
                     }
                     
-                    // For HLS/TS files (Live TV)
-                    if (urlPath.includes('.m3u8') || urlPath.includes('.ts')) {
-                        console.log('[Receiver] 📺 Live TV: HLS/TS stream detected');
-                        // Keep the content type as-is (application/x-mpegurl)
-                        // Custom headers will handle IPTV authentication
-                    }
-                    
-                    // For MKV files
-                    if (urlPath.endsWith('.mkv')) {
-                        media.contentType = 'video/x-matroska';
-                        console.log('[Receiver] 🎬 Using video/x-matroska for MKV file');
-                    }
+                    console.log('[Receiver] ===== END REQUEST =====');
                 }
                 
+                // Return unmodified request - use whatever content type the sender specified
                 return loadRequestData;
             }
         );
@@ -138,6 +223,11 @@
             cast.framework.events.EventType.PLAYER_LOADING,
             (event) => {
                 console.log('[Receiver] ⏳ Player loading...', event);
+                // Hide splash when media starts loading
+                const splash = document.getElementById('splash');
+                if (splash) {
+                    splash.classList.add('hidden');
+                }
             }
         );
 
@@ -145,6 +235,18 @@
             cast.framework.events.EventType.BUFFERING,
             (event) => {
                 console.log('[Receiver] 📊 Buffering...', event.isBuffering);
+            }
+        );
+
+        // Show splash again when media ends or session becomes idle
+        playerManager.addEventListener(
+            cast.framework.events.EventType.MEDIA_FINISHED,
+            () => {
+                console.log('[Receiver] 🏁 Media finished');
+                const splash = document.getElementById('splash');
+                if (splash) {
+                    splash.classList.remove('hidden');
+                }
             }
         );
 
