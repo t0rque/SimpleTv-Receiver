@@ -132,7 +132,8 @@
         
         // Enable all codecs for maximum compatibility
         playbackConfig.manifestRequestHandler = (request) => {
-            console.log('[Receiver] 📡 Manifest request:', request.url);
+            console.log('[Receiver] 📡 ========== MANIFEST REQUEST ==========');
+            console.log('[Receiver] URL:', request.url);
             
             // Add headers that might be needed by IPTV servers
             request.headers = request.headers || {};
@@ -141,7 +142,8 @@
             request.headers['Origin'] = 'https://supremeiptv.app';
             request.headers['Connection'] = 'keep-alive';
             
-            console.log('[Receiver] 🔑 Added custom headers for IPTV authentication');
+            console.log('[Receiver] 🔑 Custom headers:', JSON.stringify(request.headers, null, 2));
+            console.log('[Receiver] =============================================');
             return request;
         };
 
@@ -161,7 +163,7 @@
         // CRITICAL: Handle direct .ts stream URLs (not HLS)
         // For direct .ts URLs, we need special handling
         playbackConfig.licenseRequestHandler = (request) => {
-            console.log('[Receiver] 🔐 License request (shouldn't happen for IPTV):', request.url);
+            console.log('[Receiver] 🔐 License request (shouldn\'t happen for IPTV):', request.url);
             return request;
         };
 
@@ -203,26 +205,56 @@
             }
         );
 
-        // Log player events
+        // Log player events with comprehensive error details
         playerManager.addEventListener(
             cast.framework.events.EventType.ERROR,
             (event) => {
-                console.error('[Receiver] ❌ ERROR:', event);
-                console.error('[Receiver] Error details:', JSON.stringify(event, null, 2));
+                console.error('[Receiver] ❌ ========== ERROR OCCURRED ==========');
+                console.error('[Receiver] Error event:', event);
+                console.error('[Receiver] Error type:', event.type);
+                console.error('[Receiver] Error detailedErrorCode:', event.detailedErrorCode);
+                console.error('[Receiver] Error reason:', event.reason);
+                
+                // Log the media info that failed
+                const mediaInfo = playerManager.getMediaInformation();
+                if (mediaInfo) {
+                    console.error('[Receiver] Failed media URL:', mediaInfo.contentUrl);
+                    console.error('[Receiver] Failed media type:', mediaInfo.contentType);
+                    console.error('[Receiver] Failed media streamType:', mediaInfo.streamType);
+                }
+                
+                console.error('[Receiver] Full error JSON:', JSON.stringify(event, null, 2));
+                console.error('[Receiver] ========================================');
             }
         );
 
         playerManager.addEventListener(
             cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
             () => {
-                console.log('[Receiver] ✅ Player loaded successfully');
+                console.log('[Receiver] ✅ ========== PLAYER LOADED ==========');
+                const mediaInfo = playerManager.getMediaInformation();
+                if (mediaInfo) {
+                    console.log('[Receiver] Loaded URL:', mediaInfo.contentUrl);
+                    console.log('[Receiver] Content type:', mediaInfo.contentType);
+                    console.log('[Receiver] Stream type:', mediaInfo.streamType);
+                }
+                const mediaStatus = playerManager.getPlayerState();
+                console.log('[Receiver] Player state:', mediaStatus);
+                console.log('[Receiver] =========================================');
             }
         );
 
         playerManager.addEventListener(
             cast.framework.events.EventType.PLAYER_LOADING,
             (event) => {
-                console.log('[Receiver] ⏳ Player loading...', event);
+                console.log('[Receiver] ⏳ ========== PLAYER LOADING ==========');
+                console.log('[Receiver] Loading event:', event);
+                const mediaInfo = playerManager.getMediaInformation();
+                if (mediaInfo) {
+                    console.log('[Receiver] Loading URL:', mediaInfo.contentUrl);
+                    console.log('[Receiver] Content type:', mediaInfo.contentType);
+                }
+                console.log('[Receiver] =========================================');
                 // Hide splash when media starts loading
                 const splash = document.getElementById('splash');
                 if (splash) {
@@ -234,7 +266,12 @@
         playerManager.addEventListener(
             cast.framework.events.EventType.BUFFERING,
             (event) => {
-                console.log('[Receiver] 📊 Buffering...', event.isBuffering);
+                console.log('[Receiver] 📊 Buffering:', event.isBuffering ? 'STARTED' : 'ENDED');
+                if (event.isBuffering) {
+                    console.log('[Receiver] Stream is buffering...');
+                } else {
+                    console.log('[Receiver] ✅ Buffering complete, should start playing');
+                }
             }
         );
 
