@@ -88,11 +88,11 @@
                     // Remove query parameters for better extension detection
                     const urlPath = media.contentUrl.toLowerCase().split('?')[0];
                     
-                    // For MP4 files, try standard video/mp4 first
+                    // For MP4 files (VOD - Movies/Series)
                     if (urlPath.includes('.mp4')) {
                         // Try standard MP4 MIME type
                         media.contentType = 'video/mp4';
-                        console.log('[Receiver] 🎥 Using video/mp4 for MP4 file');
+                        console.log('[Receiver] 🎥 VOD: Using video/mp4 for MP4 file');
                         
                         // Set stream type appropriately
                         if (!media.streamType) {
@@ -100,10 +100,17 @@
                         }
                     }
                     
+                    // For HLS/TS files (Live TV)
+                    if (urlPath.includes('.m3u8') || urlPath.includes('.ts')) {
+                        console.log('[Receiver] 📺 Live TV: HLS/TS stream detected');
+                        // Keep the content type as-is (application/x-mpegurl)
+                        // Custom headers will handle IPTV authentication
+                    }
+                    
                     // For MKV files
                     if (urlPath.endsWith('.mkv')) {
                         media.contentType = 'video/x-matroska';
-                        console.log('[Receiver] Forcing MKV content type');
+                        console.log('[Receiver] 🎬 Using video/x-matroska for MKV file');
                     }
                 }
                 
