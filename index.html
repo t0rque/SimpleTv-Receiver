@@ -121,13 +121,16 @@
             <div class="app-icon">📺</div>
             <h1>SimpleTv</h1>
             <p>Premium IPTV Experience</p>
-            <p style="color: #ff0000; font-size: 32px; font-weight: bold; margin-top: 20px;">🔴 RECEIVER v6 LOADED 🔴</p>
+            <p style="color: #00ff00; font-size: 32px; font-weight: bold; margin-top: 20px;">🔴 RECEIVER v7 - REDIRECT FIX 🔴</p>
         </div>
         <div class="status">Ready to Cast...</div>
         <div id="debug-log" style="position: absolute; bottom: 20px; left: 20px; right: 20px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; font-family: monospace; font-size: 18px; max-height: 300px; overflow-y: auto; color: #0f0;"></div>
     </div>
 
     <script>
+        // RECEIVER VERSION - Update this when you make changes
+        const RECEIVER_VERSION = 7;
+        
         // IMMEDIATE DEBUG - Show on screen BEFORE Cast framework loads
         function debugLog(msg) {
             const debugDiv = document.getElementById('debug-log');
@@ -141,6 +144,7 @@
         
         debugLog('========================================');
         debugLog('🚀 SimpleTv Receiver Starting...');
+        debugLog('📦 RECEIVER VERSION: ' + RECEIVER_VERSION);
         debugLog('📅 Load time: ' + new Date().toISOString());
         debugLog('🌐 URL: ' + window.location.href);
         debugLog('========================================');
@@ -277,7 +281,14 @@
                     console.log('[Receiver] ===== END REQUEST =====');
                 }
                 
-                // Return unmodified request - use whatever content type the sender specified
+                // Send receiver version back to sender app
+                const customData = loadRequestData.customData || {};
+                customData.receiverVersion = RECEIVER_VERSION;
+                loadRequestData.customData = customData;
+                
+                debugLog('📤 Sending receiver version: ' + RECEIVER_VERSION);
+                
+                // Return modified request with version info
                 return loadRequestData;
             }
         );
