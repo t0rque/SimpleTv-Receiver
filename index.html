@@ -185,27 +185,14 @@
             console.log('[Receiver] URL:', request.url);
             castDebugLogger.info(LOG_TAG, '📡 Manifest request: ' + request.url.substring(0, 80));
             
-            // Only add custom headers for HLS/manifest files, not for direct video files
-            const urlLower = request.url.toLowerCase();
-            const isDirectVideo = urlLower.includes('.mkv') || urlLower.includes('.mp4') || urlLower.includes('.avi');
+            // Add mobile User-Agent to ALL requests (including redirects)
+            request.headers = request.headers || {};
+            request.headers['User-Agent'] = 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1';
+            request.headers['Accept'] = '*/*';
+            request.headers['Connection'] = 'keep-alive';
             
-            if (!isDirectVideo) {
-                // Add headers for IPTV streams (HLS/TS)
-                // CRITICAL: Use mobile app User-Agent to avoid IPTV server blocking
-                request.headers = request.headers || {};
-                request.headers['User-Agent'] = 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1';
-                request.headers['Accept'] = '*/*';
-                request.headers['Connection'] = 'keep-alive';
-                
-                console.log('[Receiver] 🔑 Custom headers for HLS/TS:', JSON.stringify(request.headers, null, 2));
-                castDebugLogger.debug(LOG_TAG, '🔑 Added mobile User-Agent');
-            } else {
-                // For direct video files, also use mobile User-Agent to avoid blocking
-                request.headers = request.headers || {};
-                request.headers['User-Agent'] = 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1';
-                console.log('[Receiver] 🎥 Direct video file - using mobile User-Agent');
-                castDebugLogger.debug(LOG_TAG, '🎥 Direct video - mobile UA');
-            }
+            console.log('[Receiver] 🔑 Custom headers:', JSON.stringify(request.headers, null, 2));
+            castDebugLogger.debug(LOG_TAG, '🔑 Added mobile User-Agent');
             
             console.log('[Receiver] =============================================');
             return request;
@@ -239,7 +226,7 @@
         // Intercept LOAD requests to log and add custom handling if needed
         playerManager.setMessageInterceptor(
             cast.framework.messages.MessageType.LOAD,
-            async (loadRequestData) => {
+            (loadRequestData) => {
                 debugLog('===== LOAD REQUEST =====');
                 console.log('[Receiver] ===== LOAD REQUEST =====');
                 console.log('[Receiver] Full request:', JSON.stringify(loadRequestData, null, 2));
@@ -248,43 +235,14 @@
                 const media = loadRequestData.media;
                 if (media && media.contentUrl) {
                     const originalUrl = media.contentUrl;
-                    debugLog('📡 Original URL: ' + originalUrl.substring(0, 60));
-                    console.log('[Receiver] 📡 Original URL:', originalUrl);
-                    castDebugLogger.info(LOG_TAG, '📡 Original URL: ' + originalUrl.substring(0, 80));
+                    debugLog('📡 URL: ' + originalUrl.substring(0, 60));
+                    console.log('[Receiver] 📡 URL:', originalUrl);
+                    castDebugLogger.info(LOG_TAG, '📡 URL: ' + originalUrl.substring(0, 80));
                     
-                    // Try to resolve redirects for IPTV streams
-                    try {
-                        console.log('[REDIRECT] Checking for redirects...');
-                        castDebugLogger.info(LOG_TAG, '🔄 Checking redirects...');
-                        
-                        const response = await fetch(originalUrl, {
-                            method: 'HEAD',
-                            redirect: 'manual' // Don't auto-follow
-                        });
-                        
-                        console.log('[REDIRECT] Response status:', response.status);
-                        castDebugLogger.info(LOG_TAG, '🔄 Status: ' + response.status);
-                        
-                        if (response.status === 302 || response.status === 301) {
-                            const redirectUrl = response.headers.get('Location');
-                            if (redirectUrl) {
-                                console.log('[REDIRECT] ✅ Found redirect:', redirectUrl);
-                                castDebugLogger.warn(LOG_TAG, '🔄 REDIRECT: ' + redirectUrl.substring(0, 80));
-                                media.contentUrl = redirectUrl;
-                            } else {
-                                console.log('[REDIRECT] ⚠️ No Location header');
-                                castDebugLogger.warn(LOG_TAG, '⚠️ No redirect location');
-                            }
-                        } else {
-                            console.log('[REDIRECT] ℹ️ No redirect detected');
-                            castDebugLogger.debug(LOG_TAG, 'ℹ️ No redirect');
-                        }
-                    } catch (error) {
-                        console.error('[REDIRECT] ❌ Error:', error);
-                        castDebugLogger.error(LOG_TAG, '❌ Redirect error: ' + error.message);
-                    }
+                    // Note: We don't resolve redirects here - the player will follow them
+                    // Our manifestRequestHandler will add the proper headers to authenticate
+                    castDebugLogger.info(LOG_TAG, '🔄 Will follow redirects with mobile UA');
                     
-                    debugLog('📡 Final URL: ' + media.contentUrl.substring(0, 60));
                     debugLog('🎬 Type: ' + media.contentType);
                     debugLog('📊 Stream: ' + media.streamType);
                     
