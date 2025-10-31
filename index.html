@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SimpleTv Cast Receiver</title>
     <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+    <!-- Cast Debug Logger - Shows logs on TV screen -->
+    <script src="//www.gstatic.com/cast/sdk/libs/devtools/debug_layer/caf_receiver_logger.js"></script>
     <style>
         body {
             margin: 0;
@@ -131,20 +133,37 @@
         console.log('[Receiver] 🌐 URL:', window.location.href);
         console.log('[Receiver] ========================================');
         
+        // Initialize Cast Debug Logger - shows logs on TV screen
+        const castDebugLogger = cast.debug.CastDebugLogger.getInstance();
+        const LOG_TAG = 'SimpleTv';
+        
         const context = cast.framework.CastReceiverContext.getInstance();
         const playerManager = context.getPlayerManager();
         
         console.log('[Receiver] ✅ Cast framework loaded');
         console.log('[Receiver] ✅ Context created');
         console.log('[Receiver] ✅ Player manager initialized');
+        
+        // Enable debug logger when receiver is ready
+        context.addEventListener(cast.framework.system.EventType.READY, () => {
+            if (!castDebugLogger.debugOverlayElement_) {
+                castDebugLogger.setEnabled(true);
+                castDebugLogger.showDebugLogs(true);
+                castDebugLogger.info(LOG_TAG, '🚀 Debug logger enabled - logs will show on TV');
+                castDebugLogger.info(LOG_TAG, '📅 Receiver started at: ' + new Date().toISOString());
+            }
+        });
 
         // Configure player with custom headers and CORS handling
         const playbackConfig = new cast.framework.PlaybackConfig();
+        
+        castDebugLogger.info(LOG_TAG, '⚙️ Configuring playback with custom headers...');
         
         // Enable all codecs for maximum compatibility
         playbackConfig.manifestRequestHandler = (request) => {
             console.log('[Receiver] 📡 ========== MANIFEST REQUEST ==========');
             console.log('[Receiver] URL:', request.url);
+            castDebugLogger.info(LOG_TAG, '📡 Manifest request: ' + request.url.substring(0, 80));
             
             // Add headers that might be needed by IPTV servers
             request.headers = request.headers || {};
@@ -155,12 +174,14 @@
             
             console.log('[Receiver] 🔑 Custom headers:', JSON.stringify(request.headers, null, 2));
             console.log('[Receiver] =============================================');
+            castDebugLogger.debug(LOG_TAG, '🔑 Added custom IPTV headers');
             return request;
         };
 
         // Handle segment requests with custom headers
         playbackConfig.segmentRequestHandler = (request) => {
             console.log('[Receiver] 📦 Segment request:', request.url.substring(0, 100));
+            castDebugLogger.debug(LOG_TAG, '📦 Segment: ' + request.url.substring(0, 60));
             
             // Add headers for segment requests (.ts files)
             request.headers = request.headers || {};
@@ -175,10 +196,12 @@
         // For direct .ts URLs, we need special handling
         playbackConfig.licenseRequestHandler = (request) => {
             console.log('[Receiver] 🔐 License request (shouldn\'t happen for IPTV):', request.url);
+            castDebugLogger.warn(LOG_TAG, '🔐 Unexpected license request');
             return request;
         };
 
         playerManager.setPlaybackConfig(playbackConfig);
+        castDebugLogger.info(LOG_TAG, '✅ Playback config set');
 
         // Intercept LOAD requests to log and add custom handling if needed
         playerManager.setMessageInterceptor(
@@ -186,12 +209,17 @@
             (loadRequestData) => {
                 console.log('[Receiver] ===== LOAD REQUEST =====');
                 console.log('[Receiver] Full request:', JSON.stringify(loadRequestData, null, 2));
+                castDebugLogger.info(LOG_TAG, '📥 LOAD REQUEST RECEIVED');
                 
                 const media = loadRequestData.media;
                 if (media && media.contentUrl) {
                     console.log('[Receiver] 📡 URL:', media.contentUrl);
                     console.log('[Receiver] 🎬 Content Type:', media.contentType);
                     console.log('[Receiver] 📊 Stream Type:', media.streamType);
+                    
+                    castDebugLogger.info(LOG_TAG, '📡 URL: ' + media.contentUrl.substring(0, 80));
+                    castDebugLogger.info(LOG_TAG, '🎬 Type: ' + media.contentType);
+                    castDebugLogger.info(LOG_TAG, '📊 Stream: ' + media.streamType);
                     
                     // Don't override content types - let the sender handle it
                     // The custom headers from manifestRequestHandler and segmentRequestHandler
@@ -200,12 +228,16 @@
                     const urlPath = media.contentUrl.toLowerCase();
                     if (urlPath.includes('.mp4')) {
                         console.log('[Receiver] 🎥 Detected: MP4 Video (VOD)');
+                        castDebugLogger.debug(LOG_TAG, '🎥 MP4 Video detected');
                     } else if (urlPath.includes('.m3u8')) {
                         console.log('[Receiver] 📺 Detected: HLS Stream (Live TV)');
+                        castDebugLogger.debug(LOG_TAG, '📺 HLS Stream detected');
                     } else if (urlPath.includes('.ts')) {
                         console.log('[Receiver] 📺 Detected: TS Stream (Live TV)');
+                        castDebugLogger.warn(LOG_TAG, '📺 Direct .ts stream - may not work!');
                     } else if (urlPath.includes('.mkv')) {
                         console.log('[Receiver] 🎬 Detected: MKV Video');
+                        castDebugLogger.debug(LOG_TAG, '🎬 MKV Video detected');
                     }
                     
                     console.log('[Receiver] ===== END REQUEST =====');
@@ -226,12 +258,17 @@
                 console.error('[Receiver] Error detailedErrorCode:', event.detailedErrorCode);
                 console.error('[Receiver] Error reason:', event.reason);
                 
+                castDebugLogger.error(LOG_TAG, '❌ ERROR: ' + event.detailedErrorCode);
+                castDebugLogger.error(LOG_TAG, '💥 Reason: ' + (event.reason || 'Unknown'));
+                
                 // Log the media info that failed
                 const mediaInfo = playerManager.getMediaInformation();
                 if (mediaInfo) {
                     console.error('[Receiver] Failed media URL:', mediaInfo.contentUrl);
                     console.error('[Receiver] Failed media type:', mediaInfo.contentType);
                     console.error('[Receiver] Failed media streamType:', mediaInfo.streamType);
+                    
+                    castDebugLogger.error(LOG_TAG, '🔗 Failed URL: ' + (mediaInfo.contentUrl || 'Unknown').substring(0, 60));
                 }
                 
                 console.error('[Receiver] Full error JSON:', JSON.stringify(event, null, 2));
