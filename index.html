@@ -121,17 +121,29 @@
             <div class="app-icon">📺</div>
             <h1>SimpleTv</h1>
             <p>Premium IPTV Experience</p>
+            <p style="color: #ff0000; font-size: 32px; font-weight: bold; margin-top: 20px;">🔴 RECEIVER v6 LOADED 🔴</p>
         </div>
         <div class="status">Ready to Cast...</div>
+        <div id="debug-log" style="position: absolute; bottom: 20px; left: 20px; right: 20px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; font-family: monospace; font-size: 18px; max-height: 300px; overflow-y: auto; color: #0f0;"></div>
     </div>
 
     <script>
-        // CRITICAL: Log immediately when receiver loads
-        console.log('[Receiver] ========================================');
-        console.log('[Receiver] 🚀 SimpleTv Receiver Starting...');
-        console.log('[Receiver] 📅 Load time:', new Date().toISOString());
-        console.log('[Receiver] 🌐 URL:', window.location.href);
-        console.log('[Receiver] ========================================');
+        // IMMEDIATE DEBUG - Show on screen BEFORE Cast framework loads
+        function debugLog(msg) {
+            const debugDiv = document.getElementById('debug-log');
+            if (debugDiv) {
+                const timestamp = new Date().toLocaleTimeString();
+                debugDiv.innerHTML += `<div>[${timestamp}] ${msg}</div>`;
+                debugDiv.scrollTop = debugDiv.scrollHeight;
+            }
+            console.log('[Receiver] ' + msg);
+        }
+        
+        debugLog('========================================');
+        debugLog('🚀 SimpleTv Receiver Starting...');
+        debugLog('📅 Load time: ' + new Date().toISOString());
+        debugLog('🌐 URL: ' + window.location.href);
+        debugLog('========================================');
         
         // Initialize Cast Debug Logger - shows logs on TV screen
         const castDebugLogger = cast.debug.CastDebugLogger.getInstance();
@@ -140,27 +152,31 @@
         const context = cast.framework.CastReceiverContext.getInstance();
         const playerManager = context.getPlayerManager();
         
-        console.log('[Receiver] ✅ Cast framework loaded');
-        console.log('[Receiver] ✅ Context created');
-        console.log('[Receiver] ✅ Player manager initialized');
+        debugLog('✅ Cast framework loaded');
+        debugLog('✅ Context created');
+        debugLog('✅ Player manager initialized');
         
         // Enable debug logger when receiver is ready
         context.addEventListener(cast.framework.system.EventType.READY, () => {
+            debugLog('🎬 Receiver READY event fired');
             if (!castDebugLogger.debugOverlayElement_) {
                 castDebugLogger.setEnabled(true);
                 castDebugLogger.showDebugLogs(true);
                 castDebugLogger.info(LOG_TAG, '🚀 Debug logger enabled - logs will show on TV');
                 castDebugLogger.info(LOG_TAG, '📅 Receiver started at: ' + new Date().toISOString());
+                debugLog('✅ Cast Debug Logger enabled');
             }
         });
 
         // Configure player with custom headers and CORS handling
         const playbackConfig = new cast.framework.PlaybackConfig();
         
+        debugLog('⚙️ Configuring playback...');
         castDebugLogger.info(LOG_TAG, '⚙️ Configuring playback with custom headers...');
         
         // Enable all codecs for maximum compatibility
         playbackConfig.manifestRequestHandler = (request) => {
+            debugLog('📡 Manifest request: ' + request.url.substring(0, 60));
             console.log('[Receiver] 📡 ========== MANIFEST REQUEST ==========');
             console.log('[Receiver] URL:', request.url);
             castDebugLogger.info(LOG_TAG, '📡 Manifest request: ' + request.url.substring(0, 80));
@@ -207,12 +223,17 @@
         playerManager.setMessageInterceptor(
             cast.framework.messages.MessageType.LOAD,
             (loadRequestData) => {
+                debugLog('===== LOAD REQUEST =====');
                 console.log('[Receiver] ===== LOAD REQUEST =====');
                 console.log('[Receiver] Full request:', JSON.stringify(loadRequestData, null, 2));
                 castDebugLogger.info(LOG_TAG, '📥 LOAD REQUEST RECEIVED');
                 
                 const media = loadRequestData.media;
                 if (media && media.contentUrl) {
+                    debugLog('📡 URL: ' + media.contentUrl.substring(0, 60));
+                    debugLog('🎬 Type: ' + media.contentType);
+                    debugLog('📊 Stream: ' + media.streamType);
+                    
                     console.log('[Receiver] 📡 URL:', media.contentUrl);
                     console.log('[Receiver] 🎬 Content Type:', media.contentType);
                     console.log('[Receiver] 📊 Stream Type:', media.streamType);
@@ -252,6 +273,9 @@
         playerManager.addEventListener(
             cast.framework.events.EventType.ERROR,
             (event) => {
+                debugLog('❌ ERROR: ' + event.detailedErrorCode);
+                debugLog('💥 Reason: ' + (event.reason || 'Unknown'));
+                
                 console.error('[Receiver] ❌ ========== ERROR OCCURRED ==========');
                 console.error('[Receiver] Error event:', event);
                 console.error('[Receiver] Error type:', event.type);
@@ -264,6 +288,7 @@
                 // Log the media info that failed
                 const mediaInfo = playerManager.getMediaInformation();
                 if (mediaInfo) {
+                    debugLog('🔗 Failed URL: ' + (mediaInfo.contentUrl || 'Unknown').substring(0, 50));
                     console.error('[Receiver] Failed media URL:', mediaInfo.contentUrl);
                     console.error('[Receiver] Failed media type:', mediaInfo.contentType);
                     console.error('[Receiver] Failed media streamType:', mediaInfo.streamType);
@@ -295,10 +320,12 @@
         playerManager.addEventListener(
             cast.framework.events.EventType.PLAYER_LOADING,
             (event) => {
+                debugLog('⏳ PLAYER LOADING...');
                 console.log('[Receiver] ⏳ ========== PLAYER LOADING ==========');
                 console.log('[Receiver] Loading event:', event);
                 const mediaInfo = playerManager.getMediaInformation();
                 if (mediaInfo) {
+                    debugLog('📺 Loading: ' + mediaInfo.contentUrl.substring(0, 50));
                     console.log('[Receiver] Loading URL:', mediaInfo.contentUrl);
                     console.log('[Receiver] Content type:', mediaInfo.contentType);
                 }
@@ -340,6 +367,8 @@
         options.disableIdleTimeout = false;
         options.maxInactivity = 3600; // 1 hour
         
+        debugLog('========================================');
+        debugLog('🎬 Starting SimpleTv Cast Receiver...');
         console.log('[Receiver] ========================================');
         console.log('[Receiver] 🎬 Starting SimpleTv Cast Receiver...');
         console.log('[Receiver] ⚙️ Options:', JSON.stringify(options, null, 2));
@@ -347,11 +376,15 @@
         
         try {
             context.start(options);
+            debugLog('✅ Receiver started successfully!');
+            debugLog('✅ Ready to accept connections');
             console.log('[Receiver] ✅ ========================================');
             console.log('[Receiver] ✅ Receiver started successfully!');
             console.log('[Receiver] ✅ Ready to accept connections');
             console.log('[Receiver] ✅ ========================================');
         } catch (error) {
+            debugLog('❌ FAILED TO START RECEIVER!');
+            debugLog('❌ Error: ' + error);
             console.error('[Receiver] ❌ ========================================');
             console.error('[Receiver] ❌ FAILED TO START RECEIVER!');
             console.error('[Receiver] ❌ Error:', error);
