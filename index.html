@@ -386,6 +386,39 @@
             }
         );
 
+        // Listen for custom messages from the sender app
+        context.addCustomMessageListener('urn:x-cast:com.simpletv.version', (event) => {
+            debugLog('📬 Received version check message');
+            console.log('[Receiver] 📬 Version check message:', event.data);
+            
+            if (event.data && event.data.action === 'checkVersion') {
+                // Send current version back
+                const message = {
+                    type: 'versionResponse',
+                    receiverVersion: RECEIVER_VERSION,
+                    timestamp: new Date().toISOString()
+                };
+                
+                debugLog('📤 Sending version: ' + RECEIVER_VERSION);
+                context.sendCustomMessage('urn:x-cast:com.simpletv.version', event.senderId, message);
+            } else if (event.data && event.data.action === 'reload') {
+                debugLog('🔄 Reload requested - reloading receiver...');
+                console.log('[Receiver] 🔄 App requested reload to get latest version');
+                
+                // Show a message on TV before reloading
+                const splash = document.getElementById('splash');
+                if (splash) {
+                    splash.classList.remove('hidden');
+                    splash.querySelector('p:last-child').textContent = '🔄 Updating to latest version...';
+                }
+                
+                // Reload after 2 seconds to show the message
+                setTimeout(() => {
+                    window.location.reload(true); // Force reload from server
+                }, 2000);
+            }
+        });
+
         // Start the receiver
         const options = new cast.framework.CastReceiverOptions();
         options.disableIdleTimeout = false;
