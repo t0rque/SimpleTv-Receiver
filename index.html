@@ -124,8 +124,19 @@
     </div>
 
     <script>
+        // CRITICAL: Log immediately when receiver loads
+        console.log('[Receiver] ========================================');
+        console.log('[Receiver] 🚀 SimpleTv Receiver Starting...');
+        console.log('[Receiver] 📅 Load time:', new Date().toISOString());
+        console.log('[Receiver] 🌐 URL:', window.location.href);
+        console.log('[Receiver] ========================================');
+        
         const context = cast.framework.CastReceiverContext.getInstance();
         const playerManager = context.getPlayerManager();
+        
+        console.log('[Receiver] ✅ Cast framework loaded');
+        console.log('[Receiver] ✅ Context created');
+        console.log('[Receiver] ✅ Player manager initialized');
 
         // Configure player with custom headers and CORS handling
         const playbackConfig = new cast.framework.PlaybackConfig();
@@ -292,9 +303,23 @@
         options.disableIdleTimeout = false;
         options.maxInactivity = 3600; // 1 hour
         
-        console.log('[Receiver] Starting SimpleTv Cast Receiver...');
-        context.start(options);
-        console.log('[Receiver] Receiver started successfully');
+        console.log('[Receiver] ========================================');
+        console.log('[Receiver] 🎬 Starting SimpleTv Cast Receiver...');
+        console.log('[Receiver] ⚙️ Options:', JSON.stringify(options, null, 2));
+        console.log('[Receiver] ========================================');
+        
+        try {
+            context.start(options);
+            console.log('[Receiver] ✅ ========================================');
+            console.log('[Receiver] ✅ Receiver started successfully!');
+            console.log('[Receiver] ✅ Ready to accept connections');
+            console.log('[Receiver] ✅ ========================================');
+        } catch (error) {
+            console.error('[Receiver] ❌ ========================================');
+            console.error('[Receiver] ❌ FAILED TO START RECEIVER!');
+            console.error('[Receiver] ❌ Error:', error);
+            console.error('[Receiver] ❌ ========================================');
+        }
     </script>
 </body>
 </html>
