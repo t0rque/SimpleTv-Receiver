@@ -121,7 +121,7 @@
             <div class="app-icon">📺</div>
             <h1>SimpleTv</h1>
             <p>Premium IPTV Experience</p>
-            <p style="color: #00ff00; font-size: 32px; font-weight: bold; margin-top: 20px;">🔴 RECEIVER v8 - REDIRECT RESOLVER 🔴</p>
+            <p style="color: #00ff00; font-size: 32px; font-weight: bold; margin-top: 20px;">� RECEIVER v9 - CHROME UA FIX �</p>
         </div>
         <div class="status">Ready to Cast...</div>
         <div id="debug-log" style="position: absolute; bottom: 20px; left: 20px; right: 20px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; font-family: monospace; font-size: 18px; max-height: 300px; overflow-y: auto; color: #0f0;"></div>
@@ -129,7 +129,7 @@
 
     <script>
         // RECEIVER VERSION - Update this when you make changes
-        const RECEIVER_VERSION = 8;
+        const RECEIVER_VERSION = 9;
         
         // IMMEDIATE DEBUG - Show on screen BEFORE Cast framework loads
         function debugLog(msg) {
@@ -185,14 +185,14 @@
             console.log('[Receiver] URL:', request.url);
             castDebugLogger.info(LOG_TAG, '📡 Manifest request: ' + request.url.substring(0, 80));
             
-            // Add mobile User-Agent to ALL requests (including redirects)
+            // Add Chrome User-Agent (working from yesterday!)
             request.headers = request.headers || {};
-            request.headers['User-Agent'] = 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1';
+            request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
             request.headers['Accept'] = '*/*';
             request.headers['Connection'] = 'keep-alive';
             
             console.log('[Receiver] 🔑 Custom headers:', JSON.stringify(request.headers, null, 2));
-            castDebugLogger.debug(LOG_TAG, '🔑 Added mobile User-Agent');
+            castDebugLogger.debug(LOG_TAG, '🔑 Added Chrome User-Agent');
             
             console.log('[Receiver] =============================================');
             return request;
@@ -203,9 +203,9 @@
             console.log('[Receiver] 📦 Segment request:', request.url.substring(0, 100));
             castDebugLogger.debug(LOG_TAG, '📦 Segment: ' + request.url.substring(0, 60));
             
-            // Add mobile User-Agent for segment requests (.ts files)
+            // Add Chrome User-Agent for segment requests (.ts files)
             request.headers = request.headers || {};
-            request.headers['User-Agent'] = 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1';
+            request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
             request.headers['Accept'] = '*/*';
             request.headers['Connection'] = 'keep-alive';
             
