@@ -181,16 +181,25 @@
             console.log('[Receiver] URL:', request.url);
             castDebugLogger.info(LOG_TAG, '📡 Manifest request: ' + request.url.substring(0, 80));
             
-            // Add headers that might be needed by IPTV servers
-            request.headers = request.headers || {};
-            request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
-            request.headers['Accept'] = '*/*';
-            request.headers['Origin'] = 'https://supremeiptv.app';
-            request.headers['Connection'] = 'keep-alive';
+            // Only add custom headers for HLS/manifest files, not for direct video files
+            const urlLower = request.url.toLowerCase();
+            const isDirectVideo = urlLower.includes('.mkv') || urlLower.includes('.mp4') || urlLower.includes('.avi');
             
-            console.log('[Receiver] 🔑 Custom headers:', JSON.stringify(request.headers, null, 2));
+            if (!isDirectVideo) {
+                // Add headers for IPTV streams (HLS/TS)
+                request.headers = request.headers || {};
+                request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
+                request.headers['Accept'] = '*/*';
+                request.headers['Connection'] = 'keep-alive';
+                
+                console.log('[Receiver] 🔑 Custom headers for HLS/TS:', JSON.stringify(request.headers, null, 2));
+                castDebugLogger.debug(LOG_TAG, '🔑 Added custom IPTV headers');
+            } else {
+                console.log('[Receiver] 🎥 Direct video file - using default headers');
+                castDebugLogger.debug(LOG_TAG, '🎥 Direct video - default headers');
+            }
+            
             console.log('[Receiver] =============================================');
-            castDebugLogger.debug(LOG_TAG, '🔑 Added custom IPTV headers');
             return request;
         };
 
