@@ -239,7 +239,7 @@
         // Intercept LOAD requests to log and add custom handling if needed
         playerManager.setMessageInterceptor(
             cast.framework.messages.MessageType.LOAD,
-            (loadRequestData) => {
+            async (loadRequestData) => {
                 debugLog('===== LOAD REQUEST =====');
                 console.log('[Receiver] ===== LOAD REQUEST =====');
                 console.log('[Receiver] Full request:', JSON.stringify(loadRequestData, null, 2));
@@ -247,15 +247,52 @@
                 
                 const media = loadRequestData.media;
                 if (media && media.contentUrl) {
-                    debugLog('📡 URL: ' + media.contentUrl.substring(0, 60));
+                    const originalUrl = media.contentUrl;
+                    debugLog('📡 Original URL: ' + originalUrl.substring(0, 60));
+                    console.log('[Receiver] 📡 Original URL:', originalUrl);
+                    castDebugLogger.info(LOG_TAG, '📡 Original URL: ' + originalUrl.substring(0, 80));
+                    
+                    // Try to resolve redirects for IPTV streams
+                    try {
+                        console.log('[REDIRECT] Checking for redirects...');
+                        castDebugLogger.info(LOG_TAG, '🔄 Checking redirects...');
+                        
+                        const response = await fetch(originalUrl, {
+                            method: 'HEAD',
+                            redirect: 'manual' // Don't auto-follow
+                        });
+                        
+                        console.log('[REDIRECT] Response status:', response.status);
+                        castDebugLogger.info(LOG_TAG, '🔄 Status: ' + response.status);
+                        
+                        if (response.status === 302 || response.status === 301) {
+                            const redirectUrl = response.headers.get('Location');
+                            if (redirectUrl) {
+                                console.log('[REDIRECT] ✅ Found redirect:', redirectUrl);
+                                castDebugLogger.warn(LOG_TAG, '🔄 REDIRECT: ' + redirectUrl.substring(0, 80));
+                                media.contentUrl = redirectUrl;
+                            } else {
+                                console.log('[REDIRECT] ⚠️ No Location header');
+                                castDebugLogger.warn(LOG_TAG, '⚠️ No redirect location');
+                            }
+                        } else {
+                            console.log('[REDIRECT] ℹ️ No redirect detected');
+                            castDebugLogger.debug(LOG_TAG, 'ℹ️ No redirect');
+                        }
+                    } catch (error) {
+                        console.error('[REDIRECT] ❌ Error:', error);
+                        castDebugLogger.error(LOG_TAG, '❌ Redirect error: ' + error.message);
+                    }
+                    
+                    debugLog('📡 Final URL: ' + media.contentUrl.substring(0, 60));
                     debugLog('🎬 Type: ' + media.contentType);
                     debugLog('📊 Stream: ' + media.streamType);
                     
-                    console.log('[Receiver] 📡 URL:', media.contentUrl);
+                    console.log('[Receiver] 📡 Final URL:', media.contentUrl);
                     console.log('[Receiver] 🎬 Content Type:', media.contentType);
                     console.log('[Receiver] 📊 Stream Type:', media.streamType);
                     
-                    castDebugLogger.info(LOG_TAG, '📡 URL: ' + media.contentUrl.substring(0, 80));
+                    castDebugLogger.info(LOG_TAG, '📡 Final URL: ' + media.contentUrl.substring(0, 80));
                     castDebugLogger.info(LOG_TAG, '🎬 Type: ' + media.contentType);
                     castDebugLogger.info(LOG_TAG, '📊 Stream: ' + media.streamType);
                     
