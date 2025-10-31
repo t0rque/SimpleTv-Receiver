@@ -187,16 +187,20 @@
             
             if (!isDirectVideo) {
                 // Add headers for IPTV streams (HLS/TS)
+                // CRITICAL: Use mobile app User-Agent to avoid IPTV server blocking
                 request.headers = request.headers || {};
-                request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
+                request.headers['User-Agent'] = 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1';
                 request.headers['Accept'] = '*/*';
                 request.headers['Connection'] = 'keep-alive';
                 
                 console.log('[Receiver] 🔑 Custom headers for HLS/TS:', JSON.stringify(request.headers, null, 2));
-                castDebugLogger.debug(LOG_TAG, '🔑 Added custom IPTV headers');
+                castDebugLogger.debug(LOG_TAG, '🔑 Added mobile User-Agent');
             } else {
-                console.log('[Receiver] 🎥 Direct video file - using default headers');
-                castDebugLogger.debug(LOG_TAG, '🎥 Direct video - default headers');
+                // For direct video files, also use mobile User-Agent to avoid blocking
+                request.headers = request.headers || {};
+                request.headers['User-Agent'] = 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1';
+                console.log('[Receiver] 🎥 Direct video file - using mobile User-Agent');
+                castDebugLogger.debug(LOG_TAG, '🎥 Direct video - mobile UA');
             }
             
             console.log('[Receiver] =============================================');
@@ -208,9 +212,9 @@
             console.log('[Receiver] 📦 Segment request:', request.url.substring(0, 100));
             castDebugLogger.debug(LOG_TAG, '📦 Segment: ' + request.url.substring(0, 60));
             
-            // Add headers for segment requests (.ts files)
+            // Add mobile User-Agent for segment requests (.ts files)
             request.headers = request.headers || {};
-            request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
+            request.headers['User-Agent'] = 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1';
             request.headers['Accept'] = '*/*';
             request.headers['Connection'] = 'keep-alive';
             
