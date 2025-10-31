@@ -5,146 +5,369 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SimpleTv Cast Receiver</title>
     <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+    <!-- Cast Debug Logger - Shows logs on TV screen -->
+    <script src="//www.gstatic.com/cast/sdk/libs/devtools/debug_layer/caf_receiver_logger.js"></script>
     <style>
         body {
             margin: 0;
             padding: 0;
-            background-color: #000;
+            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 100%);
             overflow: hidden;
+            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
         }
         
         #splash {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             text-align: center;
             color: #fff;
-            font-family: 'Roboto', sans-serif;
+            transition: opacity 0.5s ease-out;
+        }
+        
+        #splash.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .logo-container {
+            margin-bottom: 40px;
+            animation: fadeInScale 1s ease-out;
+        }
+        
+        .app-icon {
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 64px;
+            margin: 0 auto 20px;
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.4);
         }
         
         #splash h1 {
-            font-size: 48px;
-            margin-bottom: 20px;
+            font-size: 56px;
+            font-weight: 700;
+            margin: 0 0 16px 0;
+            letter-spacing: -1px;
+            animation: fadeInUp 0.8s ease-out 0.2s both;
         }
         
         #splash p {
             font-size: 24px;
-            opacity: 0.7;
+            opacity: 0.8;
+            margin: 0;
+            animation: fadeInUp 0.8s ease-out 0.4s both;
+        }
+        
+        .status {
+            margin-top: 40px;
+            font-size: 18px;
+            opacity: 0.6;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes fadeInScale {
+            from {
+                opacity: 0;
+                transform: scale(0.8);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 0.6;
+            }
+            50% {
+                opacity: 1;
+            }
+        }
+        
+        /* Media player styles - shown when content is playing */
+        cast-media-player {
+            --theme-hue: 250;
+            --progress-color: rgba(102, 126, 234, 0.9);
+            --splash-image: none;
         }
     </style>
 </head>
 <body>
     <div id="splash">
-        <h1>📺 SimpleTv</h1>
-        <p>Ready to Cast</p>
+        <div class="logo-container">
+            <div class="app-icon">📺</div>
+            <h1>SimpleTv</h1>
+            <p>Premium IPTV Experience</p>
+            <p style="color: #ff0000; font-size: 32px; font-weight: bold; margin-top: 20px;">🔴 RECEIVER v6 LOADED 🔴</p>
+        </div>
+        <div class="status">Ready to Cast...</div>
+        <div id="debug-log" style="position: absolute; bottom: 20px; left: 20px; right: 20px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; font-family: monospace; font-size: 18px; max-height: 300px; overflow-y: auto; color: #0f0;"></div>
     </div>
 
     <script>
+        // IMMEDIATE DEBUG - Show on screen BEFORE Cast framework loads
+        function debugLog(msg) {
+            const debugDiv = document.getElementById('debug-log');
+            if (debugDiv) {
+                const timestamp = new Date().toLocaleTimeString();
+                debugDiv.innerHTML += `<div>[${timestamp}] ${msg}</div>`;
+                debugDiv.scrollTop = debugDiv.scrollHeight;
+            }
+            console.log('[Receiver] ' + msg);
+        }
+        
+        debugLog('========================================');
+        debugLog('🚀 SimpleTv Receiver Starting...');
+        debugLog('📅 Load time: ' + new Date().toISOString());
+        debugLog('🌐 URL: ' + window.location.href);
+        debugLog('========================================');
+        
+        // Initialize Cast Debug Logger - shows logs on TV screen
+        const castDebugLogger = cast.debug.CastDebugLogger.getInstance();
+        const LOG_TAG = 'SimpleTv';
+        
         const context = cast.framework.CastReceiverContext.getInstance();
         const playerManager = context.getPlayerManager();
+        
+        debugLog('✅ Cast framework loaded');
+        debugLog('✅ Context created');
+        debugLog('✅ Player manager initialized');
+        
+        // Enable debug logger when receiver is ready
+        context.addEventListener(cast.framework.system.EventType.READY, () => {
+            debugLog('🎬 Receiver READY event fired');
+            if (!castDebugLogger.debugOverlayElement_) {
+                castDebugLogger.setEnabled(true);
+                castDebugLogger.showDebugLogs(true);
+                castDebugLogger.info(LOG_TAG, '🚀 Debug logger enabled - logs will show on TV');
+                castDebugLogger.info(LOG_TAG, '📅 Receiver started at: ' + new Date().toISOString());
+                debugLog('✅ Cast Debug Logger enabled');
+            }
+        });
 
         // Configure player with custom headers and CORS handling
         const playbackConfig = new cast.framework.PlaybackConfig();
         
+        debugLog('⚙️ Configuring playback...');
+        castDebugLogger.info(LOG_TAG, '⚙️ Configuring playback with custom headers...');
+        
         // Enable all codecs for maximum compatibility
         playbackConfig.manifestRequestHandler = (request) => {
-            console.log('[Receiver] Manifest request:', request.url);
+            debugLog('📡 Manifest request: ' + request.url.substring(0, 60));
+            console.log('[Receiver] 📡 ========== MANIFEST REQUEST ==========');
+            console.log('[Receiver] URL:', request.url);
+            castDebugLogger.info(LOG_TAG, '📡 Manifest request: ' + request.url.substring(0, 80));
             
-            // Add headers that might be needed by IPTV servers
-            request.headers = request.headers || {};
-            request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
-            request.headers['Accept'] = '*/*';
-            request.headers['Origin'] = 'https://supremeiptv.app';
+            // Only add custom headers for HLS/manifest files, not for direct video files
+            const urlLower = request.url.toLowerCase();
+            const isDirectVideo = urlLower.includes('.mkv') || urlLower.includes('.mp4') || urlLower.includes('.avi');
             
+            if (!isDirectVideo) {
+                // Add headers for IPTV streams (HLS/TS)
+                request.headers = request.headers || {};
+                request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
+                request.headers['Accept'] = '*/*';
+                request.headers['Connection'] = 'keep-alive';
+                
+                console.log('[Receiver] 🔑 Custom headers for HLS/TS:', JSON.stringify(request.headers, null, 2));
+                castDebugLogger.debug(LOG_TAG, '🔑 Added custom IPTV headers');
+            } else {
+                console.log('[Receiver] 🎥 Direct video file - using default headers');
+                castDebugLogger.debug(LOG_TAG, '🎥 Direct video - default headers');
+            }
+            
+            console.log('[Receiver] =============================================');
             return request;
         };
 
         // Handle segment requests with custom headers
         playbackConfig.segmentRequestHandler = (request) => {
-            console.log('[Receiver] Segment request:', request.url);
+            console.log('[Receiver] 📦 Segment request:', request.url.substring(0, 100));
+            castDebugLogger.debug(LOG_TAG, '📦 Segment: ' + request.url.substring(0, 60));
             
-            // Add headers for segment requests
+            // Add headers for segment requests (.ts files)
             request.headers = request.headers || {};
             request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
             request.headers['Accept'] = '*/*';
+            request.headers['Connection'] = 'keep-alive';
             
+            return request;
+        };
+        
+        // CRITICAL: Handle direct .ts stream URLs (not HLS)
+        // For direct .ts URLs, we need special handling
+        playbackConfig.licenseRequestHandler = (request) => {
+            console.log('[Receiver] 🔐 License request (shouldn\'t happen for IPTV):', request.url);
+            castDebugLogger.warn(LOG_TAG, '🔐 Unexpected license request');
             return request;
         };
 
         playerManager.setPlaybackConfig(playbackConfig);
+        castDebugLogger.info(LOG_TAG, '✅ Playback config set');
 
-        // Intercept LOAD requests to modify media info if needed
+        // Intercept LOAD requests to log and add custom handling if needed
         playerManager.setMessageInterceptor(
             cast.framework.messages.MessageType.LOAD,
             (loadRequestData) => {
-                console.log('[Receiver] Load request:', JSON.stringify(loadRequestData, null, 2));
+                debugLog('===== LOAD REQUEST =====');
+                console.log('[Receiver] ===== LOAD REQUEST =====');
+                console.log('[Receiver] Full request:', JSON.stringify(loadRequestData, null, 2));
+                castDebugLogger.info(LOG_TAG, '📥 LOAD REQUEST RECEIVED');
                 
                 const media = loadRequestData.media;
                 if (media && media.contentUrl) {
-                    console.log('[Receiver] Loading:', media.contentUrl);
-                    console.log('[Receiver] Content type:', media.contentType);
+                    debugLog('📡 URL: ' + media.contentUrl.substring(0, 60));
+                    debugLog('🎬 Type: ' + media.contentType);
+                    debugLog('📊 Stream: ' + media.streamType);
                     
-                    // Remove query parameters for better extension detection
-                    const urlPath = media.contentUrl.toLowerCase().split('?')[0];
+                    console.log('[Receiver] 📡 URL:', media.contentUrl);
+                    console.log('[Receiver] 🎬 Content Type:', media.contentType);
+                    console.log('[Receiver] 📊 Stream Type:', media.streamType);
                     
-                    // For MP4 files (VOD - Movies/Series)
+                    castDebugLogger.info(LOG_TAG, '📡 URL: ' + media.contentUrl.substring(0, 80));
+                    castDebugLogger.info(LOG_TAG, '🎬 Type: ' + media.contentType);
+                    castDebugLogger.info(LOG_TAG, '📊 Stream: ' + media.streamType);
+                    
+                    // Don't override content types - let the sender handle it
+                    // The custom headers from manifestRequestHandler and segmentRequestHandler
+                    // will handle IPTV authentication for all stream types
+                    
+                    const urlPath = media.contentUrl.toLowerCase();
                     if (urlPath.includes('.mp4')) {
-                        // Try standard MP4 MIME type
-                        media.contentType = 'video/mp4';
-                        console.log('[Receiver] 🎥 VOD: Using video/mp4 for MP4 file');
-                        
-                        // Set stream type appropriately
-                        if (!media.streamType) {
-                            media.streamType = cast.framework.messages.StreamType.BUFFERED;
-                        }
+                        console.log('[Receiver] 🎥 Detected: MP4 Video (VOD)');
+                        castDebugLogger.debug(LOG_TAG, '🎥 MP4 Video detected');
+                    } else if (urlPath.includes('.m3u8')) {
+                        console.log('[Receiver] 📺 Detected: HLS Stream (Live TV)');
+                        castDebugLogger.debug(LOG_TAG, '📺 HLS Stream detected');
+                    } else if (urlPath.includes('.ts')) {
+                        console.log('[Receiver] 📺 Detected: TS Stream (Live TV)');
+                        castDebugLogger.warn(LOG_TAG, '📺 Direct .ts stream - may not work!');
+                    } else if (urlPath.includes('.mkv')) {
+                        console.log('[Receiver] 🎬 Detected: MKV Video');
+                        castDebugLogger.debug(LOG_TAG, '🎬 MKV Video detected');
                     }
                     
-                    // For HLS/TS files (Live TV)
-                    if (urlPath.includes('.m3u8') || urlPath.includes('.ts')) {
-                        console.log('[Receiver] 📺 Live TV: HLS/TS stream detected');
-                        // Keep the content type as-is (application/x-mpegurl)
-                        // Custom headers will handle IPTV authentication
-                    }
-                    
-                    // For MKV files
-                    if (urlPath.endsWith('.mkv')) {
-                        media.contentType = 'video/x-matroska';
-                        console.log('[Receiver] 🎬 Using video/x-matroska for MKV file');
-                    }
+                    console.log('[Receiver] ===== END REQUEST =====');
                 }
                 
+                // Return unmodified request - use whatever content type the sender specified
                 return loadRequestData;
             }
         );
 
-        // Log player events
+        // Log player events with comprehensive error details
         playerManager.addEventListener(
             cast.framework.events.EventType.ERROR,
             (event) => {
-                console.error('[Receiver] ❌ ERROR:', event);
-                console.error('[Receiver] Error details:', JSON.stringify(event, null, 2));
+                debugLog('❌ ERROR: ' + event.detailedErrorCode);
+                debugLog('💥 Reason: ' + (event.reason || 'Unknown'));
+                
+                console.error('[Receiver] ❌ ========== ERROR OCCURRED ==========');
+                console.error('[Receiver] Error event:', event);
+                console.error('[Receiver] Error type:', event.type);
+                console.error('[Receiver] Error detailedErrorCode:', event.detailedErrorCode);
+                console.error('[Receiver] Error reason:', event.reason);
+                
+                castDebugLogger.error(LOG_TAG, '❌ ERROR: ' + event.detailedErrorCode);
+                castDebugLogger.error(LOG_TAG, '💥 Reason: ' + (event.reason || 'Unknown'));
+                
+                // Log the media info that failed
+                const mediaInfo = playerManager.getMediaInformation();
+                if (mediaInfo) {
+                    debugLog('🔗 Failed URL: ' + (mediaInfo.contentUrl || 'Unknown').substring(0, 50));
+                    console.error('[Receiver] Failed media URL:', mediaInfo.contentUrl);
+                    console.error('[Receiver] Failed media type:', mediaInfo.contentType);
+                    console.error('[Receiver] Failed media streamType:', mediaInfo.streamType);
+                    
+                    castDebugLogger.error(LOG_TAG, '🔗 Failed URL: ' + (mediaInfo.contentUrl || 'Unknown').substring(0, 60));
+                }
+                
+                console.error('[Receiver] Full error JSON:', JSON.stringify(event, null, 2));
+                console.error('[Receiver] ========================================');
             }
         );
 
         playerManager.addEventListener(
             cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
             () => {
-                console.log('[Receiver] ✅ Player loaded successfully');
+                console.log('[Receiver] ✅ ========== PLAYER LOADED ==========');
+                const mediaInfo = playerManager.getMediaInformation();
+                if (mediaInfo) {
+                    console.log('[Receiver] Loaded URL:', mediaInfo.contentUrl);
+                    console.log('[Receiver] Content type:', mediaInfo.contentType);
+                    console.log('[Receiver] Stream type:', mediaInfo.streamType);
+                }
+                const mediaStatus = playerManager.getPlayerState();
+                console.log('[Receiver] Player state:', mediaStatus);
+                console.log('[Receiver] =========================================');
             }
         );
 
         playerManager.addEventListener(
             cast.framework.events.EventType.PLAYER_LOADING,
             (event) => {
-                console.log('[Receiver] ⏳ Player loading...', event);
+                debugLog('⏳ PLAYER LOADING...');
+                console.log('[Receiver] ⏳ ========== PLAYER LOADING ==========');
+                console.log('[Receiver] Loading event:', event);
+                const mediaInfo = playerManager.getMediaInformation();
+                if (mediaInfo) {
+                    debugLog('📺 Loading: ' + mediaInfo.contentUrl.substring(0, 50));
+                    console.log('[Receiver] Loading URL:', mediaInfo.contentUrl);
+                    console.log('[Receiver] Content type:', mediaInfo.contentType);
+                }
+                console.log('[Receiver] =========================================');
+                // Hide splash when media starts loading
+                const splash = document.getElementById('splash');
+                if (splash) {
+                    splash.classList.add('hidden');
+                }
             }
         );
 
         playerManager.addEventListener(
             cast.framework.events.EventType.BUFFERING,
             (event) => {
-                console.log('[Receiver] 📊 Buffering...', event.isBuffering);
+                console.log('[Receiver] 📊 Buffering:', event.isBuffering ? 'STARTED' : 'ENDED');
+                if (event.isBuffering) {
+                    console.log('[Receiver] Stream is buffering...');
+                } else {
+                    console.log('[Receiver] ✅ Buffering complete, should start playing');
+                }
+            }
+        );
+
+        // Show splash again when media ends or session becomes idle
+        playerManager.addEventListener(
+            cast.framework.events.EventType.MEDIA_FINISHED,
+            () => {
+                console.log('[Receiver] 🏁 Media finished');
+                const splash = document.getElementById('splash');
+                if (splash) {
+                    splash.classList.remove('hidden');
+                }
             }
         );
 
@@ -153,9 +376,29 @@
         options.disableIdleTimeout = false;
         options.maxInactivity = 3600; // 1 hour
         
-        console.log('[Receiver] Starting SimpleTv Cast Receiver...');
-        context.start(options);
-        console.log('[Receiver] Receiver started successfully');
+        debugLog('========================================');
+        debugLog('🎬 Starting SimpleTv Cast Receiver...');
+        console.log('[Receiver] ========================================');
+        console.log('[Receiver] 🎬 Starting SimpleTv Cast Receiver...');
+        console.log('[Receiver] ⚙️ Options:', JSON.stringify(options, null, 2));
+        console.log('[Receiver] ========================================');
+        
+        try {
+            context.start(options);
+            debugLog('✅ Receiver started successfully!');
+            debugLog('✅ Ready to accept connections');
+            console.log('[Receiver] ✅ ========================================');
+            console.log('[Receiver] ✅ Receiver started successfully!');
+            console.log('[Receiver] ✅ Ready to accept connections');
+            console.log('[Receiver] ✅ ========================================');
+        } catch (error) {
+            debugLog('❌ FAILED TO START RECEIVER!');
+            debugLog('❌ Error: ' + error);
+            console.error('[Receiver] ❌ ========================================');
+            console.error('[Receiver] ❌ FAILED TO START RECEIVER!');
+            console.error('[Receiver] ❌ Error:', error);
+            console.error('[Receiver] ❌ ========================================');
+        }
     </script>
 </body>
 </html>
