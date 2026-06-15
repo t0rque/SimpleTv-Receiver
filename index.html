@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>SimpleTv Cast Receiver</title>
+  <title>Supreme IPTV</title>
   <!--
-    SimpleTv Custom Cast Receiver  (App ID: 35D1A927)
+    Supreme IPTV Custom Cast Receiver  (App ID: 35D1A927)
     Hosted at: https://t0rque.github.io/SimpleTv-Receiver/
 
     Strategy:
@@ -23,19 +23,19 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #000; overflow: hidden; font-family: Arial, sans-serif; }
+    body { background: #070d1a; overflow: hidden; font-family: Arial, sans-serif; }
     video { width: 100vw; height: 100vh; object-fit: contain; display: block; }
     #overlay {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       display: flex; flex-direction: column; justify-content: center; align-items: center;
       color: #fff; text-align: center; pointer-events: none;
-      background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 100%);
+      background: radial-gradient(ellipse at center, #0d1a30 0%, #070d1a 70%);
       transition: opacity 0.5s ease-out;
     }
     #overlay.hidden { opacity: 0; }
-    #overlay .icon { font-size: 80px; margin-bottom: 20px; }
-    #overlay h1 { font-size: 52px; font-weight: 700; letter-spacing: -1px; }
-    #overlay p { font-size: 22px; opacity: 0.7; margin-top: 12px; }
+    #overlay .logo { width: 160px; height: 160px; margin-bottom: 28px; border-radius: 28px; }
+    #overlay h1 { font-size: 52px; font-weight: 700; letter-spacing: 2px; color: #00d4ff; text-shadow: 0 0 24px rgba(0,212,255,0.5); }
+    #overlay p { font-size: 22px; opacity: 0.6; margin-top: 12px; color: #a0c8e0; letter-spacing: 1px; }
     #status-bar {
       position: absolute; bottom: 24px; left: 24px;
       background: rgba(0,0,0,0.75); color: #0f0; font-size: 18px;
@@ -49,8 +49,8 @@
 <body>
   <video id="v" autoplay playsinline></video>
   <div id="overlay">
-    <div class="icon">📺</div>
-    <h1>SimpleTv</h1>
+    <img class="logo" src="./icon.png" alt="Supreme IPTV">
+    <h1>SUPREME IPTV</h1>
     <p>Ready to cast…</p>
   </div>
   <div id="status-bar">Initializing…</div>
@@ -64,7 +64,7 @@
 
     /* ── Logging ──────────────────────────────────────────────────── */
     function log(msg) {
-      console.log('[SimpleTv] ' + msg);
+      console.log('[SupremeIPTV] ' + msg);
       statusBar.textContent = msg;
       statusBar.classList.remove('hidden');
     }
@@ -137,7 +137,7 @@
       p.load();
       p.on(mpegts.Events.ERROR, (errType, errDetail) => {
         log('❌ mpegts error: ' + errType + ' / ' + errDetail);
-        console.error('[SimpleTv] mpegts error', errType, errDetail, 'url=' + url);
+        console.error('[SupremeIPTV] mpegts error', errType, errDetail, 'url=' + url);
         // Note: NETWORK_ERROR/EXCEPTION usually means CORS or mixed content.
         // upgrade-insecure-requests in <head> handles mixed content.
         // If CORS: the CDN needs Access-Control-Allow-Origin: * headers.
@@ -172,7 +172,7 @@
       h.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
           log('❌ HLS fatal error: ' + data.type);
-          console.error('[SimpleTv] HLS fatal', data);
+          console.error('[SupremeIPTV] HLS fatal', data);
         }
       });
       activePlayer = h;
@@ -190,7 +190,7 @@
         const ct     = (media.contentType || '').toLowerCase();
 
         log('📥 LOAD: ' + rawUrl.substring(0, 80));
-        console.log('[SimpleTv] LOAD  url=' + rawUrl + '  ct=' + ct);
+        console.log('[SupremeIPTV] LOAD  url=' + rawUrl + '  ct=' + ct);
 
         // Hide splash when media is requested
         overlay.classList.add('hidden');
