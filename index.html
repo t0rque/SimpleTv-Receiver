@@ -138,12 +138,23 @@
       });
       p.attachMediaElement(video);
       p.load();
+      let reconnectTimer = null;
+      function scheduleReconnect(delayMs, reason) {
+        if (reconnectTimer) return; // already scheduled
+        log('🔄 ' + reason + ' — reconnecting in ' + (delayMs / 1000).toFixed(0) + 's…');
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          log('🔄 Reconnecting mpegts stream…');
+          playMpegTs(url); // destroyPlayer() is called inside, resets everything
+        }, delayMs);
+      }
       p.on(mpegts.Events.ERROR, (errType, errDetail) => {
         log('❌ mpegts error: ' + errType + ' / ' + errDetail);
         console.error('[SupremeIPTV] mpegts error', errType, errDetail, 'url=' + url);
-        // Note: NETWORK_ERROR/EXCEPTION usually means CORS or mixed content.
-        // upgrade-insecure-requests in <head> handles mixed content.
-        // If CORS: the CDN needs Access-Control-Allow-Origin: * headers.
+        // Reconnect on network errors (CDN session expired, proxy dropped, etc.)
+        if (errType === mpegts.ErrorTypes.NETWORK_ERROR || errType === mpegts.ErrorTypes.IO_ERROR) {
+          scheduleReconnect(3000, 'Network error');
+        }
       });
       activePlayer = p;
       video.play().catch(e => log('play() rejected: ' + e.message));
@@ -201,25 +212,15 @@
         // ── Raw MPEG-TS (.ts or video/mp2t, or proxy /api/stream URL) ─────────
         if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || rawUrl.includes('/api/stream')) {
           // URL types we may receive:
-          //   1. http://192.168.x.x:PORT/stream  — local phone proxy (LAN, residential IP)
-          //   2. http://cdn.iptv.com/.../stream.ts — direct stream, no redirect (stable URL)
-          //   3. https://tunnel/api/stream?url=...  — remote HTTPS proxy (fallback)
+          //   1. http://192.168.x.x:PORT/stream  — local phone proxy (LAN)
+          //      → mpegts.js: Chromecast Chromium allows HTTP fetch from HTTPS receivers
+          //   2. https://proxy/api/stream?url=...  — Cloudflare Worker or cloudflared proxy
+          //      → mpegts.js: XHR is fine over HTTPS
           //
-          // Rule: http:// → <video src> (native element, Chromecast handles HTTP media
-          //                  without mixed-content restrictions in its media pipeline)
-          //       https://→ mpegts.js (XHR allowed, low-latency live stream handling)
-          if (rawUrl.startsWith('http://')) {
-            log('📡 HTTP stream → native video element (' +
-              (/192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(rawUrl) ? 'local proxy' : 'direct') + ')');
-            destroyPlayer();
-            overlay.classList.add('hidden');
-            video.src = rawUrl;
-            video.play().catch(e => log('play() rejected: ' + e.message));
-          } else {
-            // https:// — HTTPS proxy URL, mpegts.js XHR works fine
-            log('📡 HTTPS proxy stream → mpegts.js');
-            playMpegTs(rawUrl);
-          }
+          // Raw http:// CDN URLs (non-LAN) should never reach here — they must be wrapped
+          // in an https:// proxy by the sender (phone local proxy or Cloudflare Worker).
+          log('📡 MPEG-TS stream → mpegts.js');
+          playMpegTs(rawUrl);
           return null; // We own playback — bypass CAF
         }
 
