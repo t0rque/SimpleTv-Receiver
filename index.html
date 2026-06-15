@@ -8,9 +8,11 @@
     Hosted at: https://t0rque.github.io/SimpleTv-Receiver/
 
     Strategy:
-      .ts URLs   → receiver resolves the 302 redirect from Chromecast's residential IP
-                   → CDN URL passed to mpegts.js (raw MPEG-TS live stream over MSE)
-                   NO proxy needed — Chromecast device has a real IP, not a datacenter IP
+      .ts URLs   → sender resolves the 302 redirect from the phone (residential IP)
+                   → if CDN is HTTPS: sender passes CDN URL directly
+                   → if CDN is HTTP: sender wraps in HTTPS proxy URL
+                   → receiver plays whatever HTTPS URL it receives via mpegts.js
+                   NOTE: HTTPS receiver cannot XHR/fetch HTTP URLs (active mixed content).
       .m3u8 URLs → play via hls.js  (robust HLS)
       other       → hand off to CAF built-in player  (mp4, mkv, etc.)
 
@@ -196,13 +198,12 @@
         // Hide splash when media is requested
         overlay.classList.add('hidden');
 
-        // ── Raw MPEG-TS (.ts or video/mp2t) ─────────────────────────────────
+        // ── Raw MPEG-TS (.ts or video/mp2t, or proxy /api/stream URL) ─────────
         if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || rawUrl.includes('/api/stream')) {
-          // Resolve the redirect from the Chromecast device (residential IP).
-          // IPTV servers do 302 → CDN URL. Chromecast's residential IP is not blocked.
-          // We only need the CDN URL — cancel the body immediately after headers.
-          const cdnUrl = await resolveRedirect(rawUrl);
-          playMpegTs(cdnUrl);
+          // Play the URL as given. The sender (app or test page) is responsible for
+          // wrapping HTTP streams in an HTTPS proxy URL — the HTTPS receiver cannot
+          // XHR/fetch HTTP URLs (Chrome blocks it as active mixed content).
+          playMpegTs(rawUrl);
           return null; // We own playback — bypass CAF
         }
 
