@@ -16,6 +16,8 @@
     Why mpegts.js?  CAF's Shaka Player cannot play raw video/mp2t live streams.
     mpegts.js uses Media Source Extensions to handle them in Chromecast's Chromium.
   -->
+  <!-- Upgrade all http:// requests to https:// — receiver is HTTPS, CDN is HTTP, mixed content is blocked -->
+  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
   <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
@@ -134,16 +136,11 @@
       p.attachMediaElement(video);
       p.load();
       p.on(mpegts.Events.ERROR, (errType, errDetail) => {
-        log('❌ mpegts error: ' + errType + ' — ' + errDetail);
-        console.error('[SimpleTv] mpegts error', errType, errDetail);
-        // On NetworkError fall back to native <video src> — some Chromecast
-        // firmware can decode MPEG-TS natively even when MSE fetch is blocked.
-        if (errType === mpegts.ErrorTypes.NETWORK_ERROR) {
-          log('⚡ NetworkError — falling back to native video.src');
-          destroyPlayer();
-          video.src = url;
-          video.play().catch(e => log('native fallback error: ' + e.message));
-        }
+        log('❌ mpegts error: ' + errType + ' / ' + errDetail);
+        console.error('[SimpleTv] mpegts error', errType, errDetail, 'url=' + url);
+        // Note: NETWORK_ERROR/EXCEPTION usually means CORS or mixed content.
+        // upgrade-insecure-requests in <head> handles mixed content.
+        // If CORS: the CDN needs Access-Control-Allow-Origin: * headers.
       });
       activePlayer = p;
       video.play().catch(e => log('play() rejected: ' + e.message));
