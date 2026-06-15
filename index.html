@@ -8,16 +8,17 @@
     Hosted at: https://t0rque.github.io/SimpleTv-Receiver/
 
     Strategy:
-      .ts URLs   → follow the 302 redirect with fetch() to get the CDN URL
-                   → play via mpegts.js  (raw MPEG-TS live stream over MSE)
+      .ts URLs   → receiver resolves the 302 redirect from Chromecast's residential IP
+                   → CDN URL passed to mpegts.js (raw MPEG-TS live stream over MSE)
+                   NO proxy needed — Chromecast device has a real IP, not a datacenter IP
       .m3u8 URLs → play via hls.js  (robust HLS)
       other       → hand off to CAF built-in player  (mp4, mkv, etc.)
 
     Why mpegts.js?  CAF's Shaka Player cannot play raw video/mp2t live streams.
     mpegts.js uses Media Source Extensions to handle them in Chromecast's Chromium.
   -->
-  <!-- Upgrade all http:// requests to https:// — receiver is HTTPS, CDN is HTTP, mixed content is blocked -->
-  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+  <!-- No mixed-content upgrade — Chromecast Chromium allows HTTP media from HTTPS receivers.
+       Upgrading http→https broke IPTV streams because CDN servers don't have HTTPS certs. -->
   <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
@@ -195,12 +196,13 @@
         // Hide splash when media is requested
         overlay.classList.add('hidden');
 
-        // ── Raw MPEG-TS (.ts or video/mp2t, or proxy /api/stream URL) ─────────
+        // ── Raw MPEG-TS (.ts or video/mp2t) ─────────────────────────────────
         if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || rawUrl.includes('/api/stream')) {
-          // Play directly — the sender already constructed a proxy URL
-          // (https://[tunnel]/api/stream?url=...) that handles CORS + redirects.
-          // Do NOT fetch/resolve here — that would consume the stream before mpegts.js.
-          playMpegTs(rawUrl);
+          // Resolve the redirect from the Chromecast device (residential IP).
+          // IPTV servers do 302 → CDN URL. Chromecast's residential IP is not blocked.
+          // We only need the CDN URL — cancel the body immediately after headers.
+          const cdnUrl = await resolveRedirect(rawUrl);
+          playMpegTs(cdnUrl);
           return null; // We own playback — bypass CAF
         }
 
