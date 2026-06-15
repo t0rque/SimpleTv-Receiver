@@ -136,6 +136,14 @@
       p.on(mpegts.Events.ERROR, (errType, errDetail) => {
         log('❌ mpegts error: ' + errType + ' — ' + errDetail);
         console.error('[SimpleTv] mpegts error', errType, errDetail);
+        // On NetworkError fall back to native <video src> — some Chromecast
+        // firmware can decode MPEG-TS natively even when MSE fetch is blocked.
+        if (errType === mpegts.ErrorTypes.NETWORK_ERROR) {
+          log('⚡ NetworkError — falling back to native video.src');
+          destroyPlayer();
+          video.src = url;
+          video.play().catch(e => log('native fallback error: ' + e.message));
+        }
       });
       activePlayer = p;
       video.play().catch(e => log('play() rejected: ' + e.message));
@@ -192,8 +200,10 @@
 
         // ── Raw MPEG-TS (.ts or video/mp2t) ───────────────────────
         if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t') {
-          const cdnUrl = await resolveRedirect(rawUrl);
-          playMpegTs(cdnUrl);
+          // Pass URL directly — mpegts.js follows 302 redirects internally via fetch.
+          // Do NOT pre-fetch to resolve the redirect: that consumes the single-use
+          // CDN token, causing the second request (from mpegts.js) to fail.
+          playMpegTs(rawUrl);
           return null; // We own playback — bypass CAF
         }
 
