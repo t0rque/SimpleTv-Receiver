@@ -1,404 +1,229 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SimpleTv Cast Receiver</title>
-    <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
-    <!-- Cast Debug Logger - Shows logs on TV screen -->
-    <script src="//www.gstatic.com/cast/sdk/libs/devtools/debug_layer/caf_receiver_logger.js"></script>
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 100%);
-            overflow: hidden;
-            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
-        }
-        
-        #splash {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            color: #fff;
-            transition: opacity 0.5s ease-out;
-        }
-        
-        #splash.hidden {
-            opacity: 0;
-            pointer-events: none;
-        }
-        
-        .logo-container {
-            margin-bottom: 40px;
-            animation: fadeInScale 1s ease-out;
-        }
-        
-        .app-icon {
-            width: 120px;
-            height: 120px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 30px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 64px;
-            margin: 0 auto 20px;
-            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.4);
-        }
-        
-        #splash h1 {
-            font-size: 56px;
-            font-weight: 700;
-            margin: 0 0 16px 0;
-            letter-spacing: -1px;
-            animation: fadeInUp 0.8s ease-out 0.2s both;
-        }
-        
-        #splash p {
-            font-size: 24px;
-            opacity: 0.8;
-            margin: 0;
-            animation: fadeInUp 0.8s ease-out 0.4s both;
-        }
-        
-        .status {
-            margin-top: 40px;
-            font-size: 18px;
-            opacity: 0.6;
-            animation: pulse 2s ease-in-out infinite;
-        }
-        
-        @keyframes fadeInScale {
-            from {
-                opacity: 0;
-                transform: scale(0.8);
-            }
-            to {
-                opacity: 1;
-                transform: scale(1);
-            }
-        }
-        
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 0.6;
-            }
-            50% {
-                opacity: 1;
-            }
-        }
-        
-        /* Media player styles - shown when content is playing */
-        cast-media-player {
-            --theme-hue: 250;
-            --progress-color: rgba(102, 126, 234, 0.9);
-            --splash-image: none;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <title>SimpleTv Cast Receiver</title>
+  <!--
+    SimpleTv Custom Cast Receiver  (App ID: 35D1A927)
+    Hosted at: https://t0rque.github.io/SimpleTv-Receiver/
+
+    Strategy:
+      .ts URLs   → follow the 302 redirect with fetch() to get the CDN URL
+                   → play via mpegts.js  (raw MPEG-TS live stream over MSE)
+      .m3u8 URLs → play via hls.js  (robust HLS)
+      other       → hand off to CAF built-in player  (mp4, mkv, etc.)
+
+    Why mpegts.js?  CAF's Shaka Player cannot play raw video/mp2t live streams.
+    mpegts.js uses Media Source Extensions to handle them in Chromecast's Chromium.
+  -->
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #000; overflow: hidden; font-family: Arial, sans-serif; }
+    video { width: 100vw; height: 100vh; object-fit: contain; display: block; }
+    #overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      color: #fff; text-align: center; pointer-events: none;
+      background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 100%);
+      transition: opacity 0.5s ease-out;
+    }
+    #overlay.hidden { opacity: 0; }
+    #overlay .icon { font-size: 80px; margin-bottom: 20px; }
+    #overlay h1 { font-size: 52px; font-weight: 700; letter-spacing: -1px; }
+    #overlay p { font-size: 22px; opacity: 0.7; margin-top: 12px; }
+    #status-bar {
+      position: absolute; bottom: 24px; left: 24px;
+      background: rgba(0,0,0,0.75); color: #0f0; font-size: 18px;
+      font-family: monospace; padding: 10px 18px; border-radius: 8px;
+      max-width: 90%; word-break: break-all;
+      transition: opacity 0.3s ease-out;
+    }
+    #status-bar.hidden { opacity: 0; }
+  </style>
 </head>
 <body>
-    <div id="splash">
-        <div class="logo-container">
-            <div class="app-icon">📺</div>
-            <h1>SimpleTv</h1>
-            <p>Premium IPTV Experience</p>
-            <p style="color: #ff0000; font-size: 32px; font-weight: bold; margin-top: 20px;">🔴 RECEIVER v6 LOADED 🔴</p>
-        </div>
-        <div class="status">Ready to Cast...</div>
-        <div id="debug-log" style="position: absolute; bottom: 20px; left: 20px; right: 20px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; font-family: monospace; font-size: 18px; max-height: 300px; overflow-y: auto; color: #0f0;"></div>
-    </div>
+  <video id="v" autoplay playsinline></video>
+  <div id="overlay">
+    <div class="icon">📺</div>
+    <h1>SimpleTv</h1>
+    <p>Ready to cast…</p>
+  </div>
+  <div id="status-bar">Initializing…</div>
 
-    <script>
-        // IMMEDIATE DEBUG - Show on screen BEFORE Cast framework loads
-        function debugLog(msg) {
-            const debugDiv = document.getElementById('debug-log');
-            if (debugDiv) {
-                const timestamp = new Date().toLocaleTimeString();
-                debugDiv.innerHTML += `<div>[${timestamp}] ${msg}</div>`;
-                debugDiv.scrollTop = debugDiv.scrollHeight;
-            }
-            console.log('[Receiver] ' + msg);
-        }
-        
-        debugLog('========================================');
-        debugLog('🚀 SimpleTv Receiver Starting...');
-        debugLog('📅 Load time: ' + new Date().toISOString());
-        debugLog('🌐 URL: ' + window.location.href);
-        debugLog('========================================');
-        
-        // Initialize Cast Debug Logger - shows logs on TV screen
-        const castDebugLogger = cast.debug.CastDebugLogger.getInstance();
-        const LOG_TAG = 'SimpleTv';
-        
-        const context = cast.framework.CastReceiverContext.getInstance();
-        const playerManager = context.getPlayerManager();
-        
-        debugLog('✅ Cast framework loaded');
-        debugLog('✅ Context created');
-        debugLog('✅ Player manager initialized');
-        
-        // Enable debug logger when receiver is ready
-        context.addEventListener(cast.framework.system.EventType.READY, () => {
-            debugLog('🎬 Receiver READY event fired');
-            if (!castDebugLogger.debugOverlayElement_) {
-                castDebugLogger.setEnabled(true);
-                castDebugLogger.showDebugLogs(true);
-                castDebugLogger.info(LOG_TAG, '🚀 Debug logger enabled - logs will show on TV');
-                castDebugLogger.info(LOG_TAG, '📅 Receiver started at: ' + new Date().toISOString());
-                debugLog('✅ Cast Debug Logger enabled');
-            }
+  <script>
+    const video     = document.getElementById('v');
+    const overlay   = document.getElementById('overlay');
+    const statusBar = document.getElementById('status-bar');
+    let activePlayer = null;
+    let statusHideTimer = null;
+
+    /* ── Logging ──────────────────────────────────────────────────── */
+    function log(msg) {
+      console.log('[SimpleTv] ' + msg);
+      statusBar.textContent = msg;
+      statusBar.classList.remove('hidden');
+    }
+    function logThenHide(msg, delayMs = 4000) {
+      log(msg);
+      clearTimeout(statusHideTimer);
+      statusHideTimer = setTimeout(() => statusBar.classList.add('hidden'), delayMs);
+    }
+
+    /* ── Player cleanup ───────────────────────────────────────────── */
+    function destroyPlayer() {
+      if (!activePlayer) return;
+      try { activePlayer.destroy(); } catch(e) {}
+      activePlayer = null;
+      video.src = '';
+      video.load();
+    }
+
+    /* ── Resolve .ts redirect via fetch() ─────────────────────────
+       Chromecast Chromium follows 302 redirects automatically.
+       response.url is the final URL after all hops.              */
+    async function resolveRedirect(url) {
+      log('🔍 Resolving redirect for ' + url.substring(0, 60) + '…');
+      try {
+        const resp = await fetch(url, {
+          method: 'GET',
+          redirect: 'follow',
+          headers: {
+            'User-Agent': 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1',
+            'Accept': '*/*',
+          },
         });
-
-        // Configure player with custom headers and CORS handling
-        const playbackConfig = new cast.framework.PlaybackConfig();
-        
-        debugLog('⚙️ Configuring playback...');
-        castDebugLogger.info(LOG_TAG, '⚙️ Configuring playback with custom headers...');
-        
-        // Enable all codecs for maximum compatibility
-        playbackConfig.manifestRequestHandler = (request) => {
-            debugLog('📡 Manifest request: ' + request.url.substring(0, 60));
-            console.log('[Receiver] 📡 ========== MANIFEST REQUEST ==========');
-            console.log('[Receiver] URL:', request.url);
-            castDebugLogger.info(LOG_TAG, '📡 Manifest request: ' + request.url.substring(0, 80));
-            
-            // Only add custom headers for HLS/manifest files, not for direct video files
-            const urlLower = request.url.toLowerCase();
-            const isDirectVideo = urlLower.includes('.mkv') || urlLower.includes('.mp4') || urlLower.includes('.avi');
-            
-            if (!isDirectVideo) {
-                // Add headers for IPTV streams (HLS/TS)
-                request.headers = request.headers || {};
-                request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
-                request.headers['Accept'] = '*/*';
-                request.headers['Connection'] = 'keep-alive';
-                
-                console.log('[Receiver] 🔑 Custom headers for HLS/TS:', JSON.stringify(request.headers, null, 2));
-                castDebugLogger.debug(LOG_TAG, '🔑 Added custom IPTV headers');
-            } else {
-                console.log('[Receiver] 🎥 Direct video file - using default headers');
-                castDebugLogger.debug(LOG_TAG, '🎥 Direct video - default headers');
-            }
-            
-            console.log('[Receiver] =============================================');
-            return request;
-        };
-
-        // Handle segment requests with custom headers
-        playbackConfig.segmentRequestHandler = (request) => {
-            console.log('[Receiver] 📦 Segment request:', request.url.substring(0, 100));
-            castDebugLogger.debug(LOG_TAG, '📦 Segment: ' + request.url.substring(0, 60));
-            
-            // Add headers for segment requests (.ts files)
-            request.headers = request.headers || {};
-            request.headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CrKey/1.56.500000';
-            request.headers['Accept'] = '*/*';
-            request.headers['Connection'] = 'keep-alive';
-            
-            return request;
-        };
-        
-        // CRITICAL: Handle direct .ts stream URLs (not HLS)
-        // For direct .ts URLs, we need special handling
-        playbackConfig.licenseRequestHandler = (request) => {
-            console.log('[Receiver] 🔐 License request (shouldn\'t happen for IPTV):', request.url);
-            castDebugLogger.warn(LOG_TAG, '🔐 Unexpected license request');
-            return request;
-        };
-
-        playerManager.setPlaybackConfig(playbackConfig);
-        castDebugLogger.info(LOG_TAG, '✅ Playback config set');
-
-        // Intercept LOAD requests to log and add custom handling if needed
-        playerManager.setMessageInterceptor(
-            cast.framework.messages.MessageType.LOAD,
-            (loadRequestData) => {
-                debugLog('===== LOAD REQUEST =====');
-                console.log('[Receiver] ===== LOAD REQUEST =====');
-                console.log('[Receiver] Full request:', JSON.stringify(loadRequestData, null, 2));
-                castDebugLogger.info(LOG_TAG, '📥 LOAD REQUEST RECEIVED');
-                
-                const media = loadRequestData.media;
-                if (media && media.contentUrl) {
-                    debugLog('📡 URL: ' + media.contentUrl.substring(0, 60));
-                    debugLog('🎬 Type: ' + media.contentType);
-                    debugLog('📊 Stream: ' + media.streamType);
-                    
-                    console.log('[Receiver] 📡 URL:', media.contentUrl);
-                    console.log('[Receiver] 🎬 Content Type:', media.contentType);
-                    console.log('[Receiver] 📊 Stream Type:', media.streamType);
-                    
-                    castDebugLogger.info(LOG_TAG, '📡 URL: ' + media.contentUrl.substring(0, 80));
-                    castDebugLogger.info(LOG_TAG, '🎬 Type: ' + media.contentType);
-                    castDebugLogger.info(LOG_TAG, '📊 Stream: ' + media.streamType);
-                    
-                    // Don't override content types - let the sender handle it
-                    // The custom headers from manifestRequestHandler and segmentRequestHandler
-                    // will handle IPTV authentication for all stream types
-                    
-                    const urlPath = media.contentUrl.toLowerCase();
-                    if (urlPath.includes('.mp4')) {
-                        console.log('[Receiver] 🎥 Detected: MP4 Video (VOD)');
-                        castDebugLogger.debug(LOG_TAG, '🎥 MP4 Video detected');
-                    } else if (urlPath.includes('.m3u8')) {
-                        console.log('[Receiver] 📺 Detected: HLS Stream (Live TV)');
-                        castDebugLogger.debug(LOG_TAG, '📺 HLS Stream detected');
-                    } else if (urlPath.includes('.ts')) {
-                        console.log('[Receiver] 📺 Detected: TS Stream (Live TV)');
-                        castDebugLogger.warn(LOG_TAG, '📺 Direct .ts stream - may not work!');
-                    } else if (urlPath.includes('.mkv')) {
-                        console.log('[Receiver] 🎬 Detected: MKV Video');
-                        castDebugLogger.debug(LOG_TAG, '🎬 MKV Video detected');
-                    }
-                    
-                    console.log('[Receiver] ===== END REQUEST =====');
-                }
-                
-                // Return unmodified request - use whatever content type the sender specified
-                return loadRequestData;
-            }
-        );
-
-        // Log player events with comprehensive error details
-        playerManager.addEventListener(
-            cast.framework.events.EventType.ERROR,
-            (event) => {
-                debugLog('❌ ERROR: ' + event.detailedErrorCode);
-                debugLog('💥 Reason: ' + (event.reason || 'Unknown'));
-                
-                console.error('[Receiver] ❌ ========== ERROR OCCURRED ==========');
-                console.error('[Receiver] Error event:', event);
-                console.error('[Receiver] Error type:', event.type);
-                console.error('[Receiver] Error detailedErrorCode:', event.detailedErrorCode);
-                console.error('[Receiver] Error reason:', event.reason);
-                
-                castDebugLogger.error(LOG_TAG, '❌ ERROR: ' + event.detailedErrorCode);
-                castDebugLogger.error(LOG_TAG, '💥 Reason: ' + (event.reason || 'Unknown'));
-                
-                // Log the media info that failed
-                const mediaInfo = playerManager.getMediaInformation();
-                if (mediaInfo) {
-                    debugLog('🔗 Failed URL: ' + (mediaInfo.contentUrl || 'Unknown').substring(0, 50));
-                    console.error('[Receiver] Failed media URL:', mediaInfo.contentUrl);
-                    console.error('[Receiver] Failed media type:', mediaInfo.contentType);
-                    console.error('[Receiver] Failed media streamType:', mediaInfo.streamType);
-                    
-                    castDebugLogger.error(LOG_TAG, '🔗 Failed URL: ' + (mediaInfo.contentUrl || 'Unknown').substring(0, 60));
-                }
-                
-                console.error('[Receiver] Full error JSON:', JSON.stringify(event, null, 2));
-                console.error('[Receiver] ========================================');
-            }
-        );
-
-        playerManager.addEventListener(
-            cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
-            () => {
-                console.log('[Receiver] ✅ ========== PLAYER LOADED ==========');
-                const mediaInfo = playerManager.getMediaInformation();
-                if (mediaInfo) {
-                    console.log('[Receiver] Loaded URL:', mediaInfo.contentUrl);
-                    console.log('[Receiver] Content type:', mediaInfo.contentType);
-                    console.log('[Receiver] Stream type:', mediaInfo.streamType);
-                }
-                const mediaStatus = playerManager.getPlayerState();
-                console.log('[Receiver] Player state:', mediaStatus);
-                console.log('[Receiver] =========================================');
-            }
-        );
-
-        playerManager.addEventListener(
-            cast.framework.events.EventType.PLAYER_LOADING,
-            (event) => {
-                debugLog('⏳ PLAYER LOADING...');
-                console.log('[Receiver] ⏳ ========== PLAYER LOADING ==========');
-                console.log('[Receiver] Loading event:', event);
-                const mediaInfo = playerManager.getMediaInformation();
-                if (mediaInfo) {
-                    debugLog('📺 Loading: ' + mediaInfo.contentUrl.substring(0, 50));
-                    console.log('[Receiver] Loading URL:', mediaInfo.contentUrl);
-                    console.log('[Receiver] Content type:', mediaInfo.contentType);
-                }
-                console.log('[Receiver] =========================================');
-                // Hide splash when media starts loading
-                const splash = document.getElementById('splash');
-                if (splash) {
-                    splash.classList.add('hidden');
-                }
-            }
-        );
-
-        playerManager.addEventListener(
-            cast.framework.events.EventType.BUFFERING,
-            (event) => {
-                console.log('[Receiver] 📊 Buffering:', event.isBuffering ? 'STARTED' : 'ENDED');
-                if (event.isBuffering) {
-                    console.log('[Receiver] Stream is buffering...');
-                } else {
-                    console.log('[Receiver] ✅ Buffering complete, should start playing');
-                }
-            }
-        );
-
-        // Show splash again when media ends or session becomes idle
-        playerManager.addEventListener(
-            cast.framework.events.EventType.MEDIA_FINISHED,
-            () => {
-                console.log('[Receiver] 🏁 Media finished');
-                const splash = document.getElementById('splash');
-                if (splash) {
-                    splash.classList.remove('hidden');
-                }
-            }
-        );
-
-        // Start the receiver
-        const options = new cast.framework.CastReceiverOptions();
-        options.disableIdleTimeout = false;
-        options.maxInactivity = 3600; // 1 hour
-        
-        debugLog('========================================');
-        debugLog('🎬 Starting SimpleTv Cast Receiver...');
-        console.log('[Receiver] ========================================');
-        console.log('[Receiver] 🎬 Starting SimpleTv Cast Receiver...');
-        console.log('[Receiver] ⚙️ Options:', JSON.stringify(options, null, 2));
-        console.log('[Receiver] ========================================');
-        
-        try {
-            context.start(options);
-            debugLog('✅ Receiver started successfully!');
-            debugLog('✅ Ready to accept connections');
-            console.log('[Receiver] ✅ ========================================');
-            console.log('[Receiver] ✅ Receiver started successfully!');
-            console.log('[Receiver] ✅ Ready to accept connections');
-            console.log('[Receiver] ✅ ========================================');
-        } catch (error) {
-            debugLog('❌ FAILED TO START RECEIVER!');
-            debugLog('❌ Error: ' + error);
-            console.error('[Receiver] ❌ ========================================');
-            console.error('[Receiver] ❌ FAILED TO START RECEIVER!');
-            console.error('[Receiver] ❌ Error:', error);
-            console.error('[Receiver] ❌ ========================================');
+        if (resp.body) resp.body.cancel().catch(() => {});
+        const finalUrl = resp.url || url;
+        if (finalUrl !== url) {
+          log('✅ Redirected → ' + finalUrl.substring(0, 70));
+        } else {
+          log('⚠️ No redirect — using original URL');
         }
-    </script>
+        return finalUrl;
+      } catch(e) {
+        log('⚠️ Redirect fetch failed (' + e.message + ') — using original');
+        return url;
+      }
+    }
+
+    /* ── mpegts.js — raw MPEG-TS live streams ─────────────────────── */
+    function playMpegTs(url) {
+      destroyPlayer();
+      if (typeof mpegts === 'undefined' || !mpegts.isSupported()) {
+        log('⚠️ mpegts.js not supported — trying native video element');
+        video.src = url;
+        video.play().catch(e => log('native play error: ' + e.message));
+        return;
+      }
+      log('▶️ mpegts.js: loading live stream…');
+      const p = mpegts.createPlayer({
+        type: 'mpegts',
+        isLive: true,
+        url: url,
+      }, {
+        enableWorker: true,
+        liveBufferLatencyChasing: true,
+        liveSync: true,
+        liveSyncMaxLatency: 6,
+        liveBufferLatencyMaxLatency: 8,
+        enableStashBuffer: false,
+      });
+      p.attachMediaElement(video);
+      p.load();
+      p.on(mpegts.Events.ERROR, (errType, errDetail) => {
+        log('❌ mpegts error: ' + errType + ' — ' + errDetail);
+        console.error('[SimpleTv] mpegts error', errType, errDetail);
+      });
+      activePlayer = p;
+      video.play().catch(e => log('play() rejected: ' + e.message));
+    }
+
+    /* ── hls.js — HLS .m3u8 streams ──────────────────────────────── */
+    function playHls(url) {
+      destroyPlayer();
+      if (!Hls.isSupported()) {
+        log('▶️ Using native HLS (Hls.js not supported)');
+        video.src = url;
+        video.play().catch(e => log('native play error: ' + e.message));
+        return;
+      }
+      log('▶️ hls.js: loading HLS stream…');
+      const h = new Hls({
+        debug: false,
+        maxBufferLength: 30,
+        lowLatencyMode: false,
+        manifestLoadingTimeOut: 10000,
+        manifestLoadingMaxRetry: 3,
+      });
+      h.loadSource(url);
+      h.attachMedia(video);
+      h.on(Hls.Events.MANIFEST_PARSED, () => {
+        log('✅ HLS manifest ready');
+        video.play().catch(e => log('play() rejected: ' + e.message));
+      });
+      h.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) {
+          log('❌ HLS fatal error: ' + data.type);
+          console.error('[SimpleTv] HLS fatal', data);
+        }
+      });
+      activePlayer = h;
+    }
+
+    /* ── Cast LOAD interceptor ────────────────────────────────────── */
+    const context       = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
+
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      async (loadRequestData) => {
+        const media  = loadRequestData.media;
+        const rawUrl = (media.contentUrl || media.contentId || '').trim();
+        const ct     = (media.contentType || '').toLowerCase();
+
+        log('📥 LOAD: ' + rawUrl.substring(0, 80));
+        console.log('[SimpleTv] LOAD  url=' + rawUrl + '  ct=' + ct);
+
+        // Hide splash when media is requested
+        overlay.classList.add('hidden');
+
+        // ── Raw MPEG-TS (.ts or video/mp2t) ───────────────────────
+        if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t') {
+          const cdnUrl = await resolveRedirect(rawUrl);
+          playMpegTs(cdnUrl);
+          return null; // We own playback — bypass CAF
+        }
+
+        // ── HLS (.m3u8 or application/*mpegurl) ───────────────────
+        if (/\.m3u8($|\?)/i.test(rawUrl) || ct.includes('mpegurl')) {
+          playHls(rawUrl);
+          return null; // We own playback — bypass CAF
+        }
+
+        // ── Anything else (mp4, mkv, etc.) — delegate to CAF ──────
+        log('📦 Delegating to CAF player: ' + rawUrl.substring(0, 60));
+        return loadRequestData;
+      }
+    );
+
+    /* ── Video events ─────────────────────────────────────────────── */
+    video.addEventListener('playing', () => logThenHide('✅ Playing', 3000));
+    video.addEventListener('waiting', () => log('⏳ Buffering…'));
+    video.addEventListener('stalled', () => log('⚠️ Stream stalled'));
+    video.addEventListener('ended',   () => { overlay.classList.remove('hidden'); log('Stream ended'); });
+    video.addEventListener('error',   () => {
+      const msg = video.error ? video.error.message : 'unknown error';
+      log('❌ Video error: ' + msg);
+      overlay.classList.remove('hidden');
+    });
+
+    /* ── Start ────────────────────────────────────────────────────── */
+    context.start({ maxInactivity: 3600 });
+    log('✅ SimpleTv Receiver ready  (35D1A927)');
+    console.log('[SimpleTv] Receiver started — App ID 35D1A927');
+  </script>
 </body>
-</html>
+</html
