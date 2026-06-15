@@ -200,10 +200,26 @@
 
         // ── Raw MPEG-TS (.ts or video/mp2t, or proxy /api/stream URL) ─────────
         if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || rawUrl.includes('/api/stream')) {
-          // Play the URL as given. The sender (app or test page) is responsible for
-          // wrapping HTTP streams in an HTTPS proxy URL — the HTTPS receiver cannot
-          // XHR/fetch HTTP URLs (Chrome blocks it as active mixed content).
-          playMpegTs(rawUrl);
+          // URL types we may receive:
+          //   1. http://192.168.x.x:PORT/stream  — local phone proxy (LAN, residential IP)
+          //   2. http://cdn.iptv.com/.../stream.ts — direct stream, no redirect (stable URL)
+          //   3. https://tunnel/api/stream?url=...  — remote HTTPS proxy (fallback)
+          //
+          // Rule: http:// → <video src> (native element, Chromecast handles HTTP media
+          //                  without mixed-content restrictions in its media pipeline)
+          //       https://→ mpegts.js (XHR allowed, low-latency live stream handling)
+          if (rawUrl.startsWith('http://')) {
+            log('📡 HTTP stream → native video element (' +
+              (/192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(rawUrl) ? 'local proxy' : 'direct') + ')');
+            destroyPlayer();
+            overlay.classList.add('hidden');
+            video.src = rawUrl;
+            video.play().catch(e => log('play() rejected: ' + e.message));
+          } else {
+            // https:// — HTTPS proxy URL, mpegts.js XHR works fine
+            log('📡 HTTPS proxy stream → mpegts.js');
+            playMpegTs(rawUrl);
+          }
           return null; // We own playback — bypass CAF
         }
 
