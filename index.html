@@ -195,11 +195,11 @@
         // Hide splash when media is requested
         overlay.classList.add('hidden');
 
-        // ── Raw MPEG-TS (.ts or video/mp2t) ───────────────────────
-        if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t') {
-          // Pass URL directly — mpegts.js follows 302 redirects internally via fetch.
-          // Do NOT pre-fetch to resolve the redirect: that consumes the single-use
-          // CDN token, causing the second request (from mpegts.js) to fail.
+        // ── Raw MPEG-TS (.ts or video/mp2t, or proxy /api/stream URL) ─────────
+        if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || rawUrl.includes('/api/stream')) {
+          // Play directly — the sender already constructed a proxy URL
+          // (https://[tunnel]/api/stream?url=...) that handles CORS + redirects.
+          // Do NOT fetch/resolve here — that would consume the stream before mpegts.js.
           playMpegTs(rawUrl);
           return null; // We own playback — bypass CAF
         }
