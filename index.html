@@ -359,20 +359,7 @@
           return null; // We own playback — bypass CAF
         }
 
-        // ── HTTP mp4 — override streamType to LIVE to bypass CAF Range prefetch ──
-        // For BUFFERED streamType, CAF makes a Range request for the moov atom.
-        // kaiser1963.design ignores Range → returns 200 → CAF waits 7s then IDLE/error.
-        // Setting streamType=LIVE tells CAF to read sequentially (no Range prefetch),
-        // so it starts playing as soon as the beginning of the file is buffered.
-        // Tradeoff: seek bar disabled from phone for HTTP mp4 files.
-        if (rawUrl.startsWith('http://') && /\.mp4($|\?)/i.test(rawUrl)) {
-          destroyPlayer();
-          loadRequestData.media.streamType = cast.framework.messages.StreamType.LIVE;
-          log('🎬 HTTP mp4 → LIVE streamType (skip Range prefetch)');
-          return loadRequestData;
-        }
-
-        // ── Anything else (HTTPS mp4, mkv, avi, webm) — delegate to CAF ──────
+        // ── Anything else (HTTP/HTTPS mp4, mkv, avi, webm) — delegate to CAF ──────
         // MUST destroy any active mpegts.js/HLS.js player first.
         // If a live stream was playing, it holds the <video> element.
         // CAF needs a clean video element or it goes IDLE immediately.
