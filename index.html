@@ -147,7 +147,6 @@
     let switchTimer      = null;
     let nowPlayingTimer  = null;
     let currentChannel   = '';
-    let isPlayingNow     = false; // true only after first 'playing' event for current stream
 
     /* ── Logging ──────────────────────────────────────────────────── */
     function log(msg) {
@@ -167,14 +166,13 @@
 
     /* ── Channel-switching overlay ───────────────────────────────── */
     function showSwitching(channelName) {
-      isPlayingNow = false; // reset playing state when switching channel
       currentChannel = channelName || 'Loading…';
       switchChName.textContent = currentChannel;
       switchChSub.textContent = 'Switching channel';
       switchOverlay.classList.add('visible');
       clearTimeout(switchTimer);
-      // Safety: auto-hide after 5s in case playback events don't fire
-      switchTimer = setTimeout(() => hideSwitching(), 5000);
+      // Safety: auto-hide after 12s in case playback events don't fire
+      switchTimer = setTimeout(() => hideSwitching(), 12000);
     }
     function hideSwitching() {
       clearTimeout(switchTimer);
@@ -356,7 +354,9 @@
         }
 
         // ── Anything else (mp4, mkv, etc.) — delegate to CAF ──────
-        // Clean up any active mpegts.js/hls.js player first so CAF gets a clean video element
+        // MUST destroy any active mpegts.js/HLS.js player first.
+        // If a live stream was playing, it holds the <video> element.
+        // CAF needs a clean video element or it goes IDLE immediately.
         destroyPlayer();
         log('📦 Delegating to CAF player: ' + rawUrl.substring(0, 60));
         return loadRequestData;
@@ -365,33 +365,28 @@
 
     /* ── Video events ─────────────────────────────────────────────── */
     video.addEventListener('playing', () => {
-      isPlayingNow = true;
       hideSwitching();
       setBuffering(false);
       showNowPlaying(currentChannel);
       logThenHide('✅ Playing', 3000);
     });
     video.addEventListener('waiting', () => {
-      // Only show buffering badge if we were already playing — not during initial load
-      if (isPlayingNow) setBuffering(true);
+      setBuffering(true);
       log('⏳ Buffering…');
     });
     video.addEventListener('stalled', () => {
-      if (isPlayingNow) setBuffering(true);
+      setBuffering(true);
       log('⚠️ Stream stalled');
     });
     video.addEventListener('canplay', () => {
       setBuffering(false);
-      hideSwitching(); // belt-and-suspenders: hide switch overlay once we have data
     });
     video.addEventListener('ended', () => {
-      isPlayingNow = false;
       setBuffering(false);
       overlay.classList.remove('hidden');
       log('Stream ended');
     });
     video.addEventListener('error', () => {
-      isPlayingNow = false;
       hideSwitching();
       setBuffering(false);
       const msg = video.error ? video.error.message : 'unknown error';
