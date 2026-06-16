@@ -333,15 +333,21 @@
         showSwitching(channelName);
 
         // ── Raw MPEG-TS (.ts or video/mp2t, or proxy /api/stream URL) ─────────
-        if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || rawUrl.includes('/api/stream')) {
+        // For proxy URLs (/api/stream?url=...), decode the underlying URL to check
+        // its extension. mp4/mkv/avi/webm proxy URLs must go to CAF, not mpegts.js.
+        let isLiveProxy = false;
+        if (rawUrl.includes('/api/stream')) {
+          try {
+            const proxiedUrl = new URL(rawUrl).searchParams.get('url') || '';
+            isLiveProxy = !/\.(mp4|mkv|avi|webm)($|\?)/i.test(proxiedUrl);
+          } catch(e) {
+            isLiveProxy = true; // Can't parse — assume live
+          }
+        }
+        if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || isLiveProxy) {
           // URL types we may receive:
           //   1. http://192.168.x.x:PORT/stream  — local phone proxy (LAN)
-          //      → mpegts.js: Chromecast Chromium allows HTTP fetch from HTTPS receivers
-          //   2. https://proxy/api/stream?url=...  — Cloudflare Worker or cloudflared proxy
-          //      → mpegts.js: XHR is fine over HTTPS
-          //
-          // Raw http:// CDN URLs (non-LAN) should never reach here — they must be wrapped
-          // in an https:// proxy by the sender (phone local proxy or Cloudflare Worker).
+          //   2. https://proxy/api/stream?url=...ts  — Cloudflare Worker (live TS only)
           log('📡 MPEG-TS stream → mpegts.js');
           playMpegTs(rawUrl);
           return null; // We own playback — bypass CAF
