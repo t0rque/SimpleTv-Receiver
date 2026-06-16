@@ -39,42 +39,158 @@
     #overlay .logo { width: 160px; height: 160px; margin-bottom: 28px; border-radius: 28px; }
     #overlay h1 { font-size: 52px; font-weight: 700; letter-spacing: 2px; color: #00d4ff; text-shadow: 0 0 24px rgba(0,212,255,0.5); }
     #overlay p { font-size: 22px; opacity: 0.6; margin-top: 12px; color: #a0c8e0; letter-spacing: 1px; }
+    /* ── Debug log bar (only shown in #debug mode) ──────────────── */
     #status-bar {
       position: absolute; bottom: 24px; left: 24px;
-      background: rgba(0,0,0,0.75); color: #0f0; font-size: 18px;
-      font-family: monospace; padding: 10px 18px; border-radius: 8px;
+      background: rgba(0,0,0,0.85); color: #0f0; font-size: 15px;
+      font-family: monospace; padding: 8px 14px; border-radius: 8px;
       max-width: 90%; word-break: break-all;
       transition: opacity 0.3s ease-out;
+      display: none; /* hidden by default — shown only in #debug mode */
     }
-    #status-bar.hidden { opacity: 0; }
+    #status-bar.visible { display: block; }
+    #status-bar.fade { opacity: 0; }
+
+    /* ── Channel-switching overlay ───────────────────────────────── */
+    #switch-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      background: rgba(7, 13, 26, 0.88);
+      color: #fff; text-align: center; pointer-events: none;
+      opacity: 0; transition: opacity 0.25s ease-in-out;
+    }
+    #switch-overlay.visible { opacity: 1; }
+    #switch-overlay .spinner {
+      width: 56px; height: 56px; border-radius: 50%;
+      border: 5px solid rgba(0,212,255,0.2);
+      border-top-color: #00d4ff;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 22px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #switch-overlay .ch-name {
+      font-size: 32px; font-weight: 700; color: #fff;
+      letter-spacing: 1px; max-width: 80%;
+      text-shadow: 0 2px 12px rgba(0,0,0,0.8);
+    }
+    #switch-overlay .ch-sub {
+      font-size: 18px; color: #a0c8e0; margin-top: 10px; opacity: 0.75;
+    }
+
+    /* ── Buffering badge ─────────────────────────────────────────── */
+    #buffering-badge {
+      position: absolute; top: 24px; right: 24px;
+      background: rgba(0,0,0,0.7); color: #ffcc00;
+      font-size: 16px; font-family: Arial, sans-serif;
+      padding: 7px 14px; border-radius: 20px;
+      border: 1px solid rgba(255,204,0,0.4);
+      pointer-events: none;
+      opacity: 0; transition: opacity 0.3s ease-in-out;
+    }
+    #buffering-badge.visible { opacity: 1; }
+
+    /* ── "Now Playing" toast (fades in then out) ─────────────────── */
+    #now-playing {
+      position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.72); color: #fff;
+      font-size: 20px; font-family: Arial, sans-serif; font-weight: 600;
+      padding: 12px 28px; border-radius: 32px;
+      border: 1px solid rgba(255,255,255,0.15);
+      pointer-events: none; white-space: nowrap;
+      opacity: 0; transition: opacity 0.4s ease-in-out;
+    }
+    #now-playing.visible { opacity: 1; }
   </style>
 </head>
 <body>
   <video id="v" autoplay playsinline></video>
+
+  <!-- Idle splash -->
   <div id="overlay">
     <img class="logo" src="./icon.png" alt="Supreme IPTV">
     <h1>SUPREME IPTV</h1>
     <p>Ready to cast…</p>
   </div>
-  <div id="status-bar">Initializing…</div>
+
+  <!-- Channel switching overlay (spinner + name) -->
+  <div id="switch-overlay">
+    <div class="spinner"></div>
+    <div class="ch-name" id="switch-ch-name">Loading…</div>
+    <div class="ch-sub" id="switch-ch-sub">Switching channel</div>
+  </div>
+
+  <!-- Buffering badge (top-right corner) -->
+  <div id="buffering-badge">⏳ Buffering…</div>
+
+  <!-- Now playing toast (bottom centre, fades out) -->
+  <div id="now-playing" id="now-playing-text"></div>
+
+  <!-- Debug log bar (only visible in #debug mode) -->
+  <div id="status-bar"></div>
 
   <script>
-    const video     = document.getElementById('v');
-    const overlay   = document.getElementById('overlay');
-    const statusBar = document.getElementById('status-bar');
-    let activePlayer = null;
-    let statusHideTimer = null;
+    const video          = document.getElementById('v');
+    const overlay        = document.getElementById('overlay');
+    const statusBar      = document.getElementById('status-bar');
+    const switchOverlay  = document.getElementById('switch-overlay');
+    const switchChName   = document.getElementById('switch-ch-name');
+    const switchChSub    = document.getElementById('switch-ch-sub');
+    const bufferingBadge = document.getElementById('buffering-badge');
+    const nowPlaying     = document.getElementById('now-playing');
+
+    // Debug mode: add #debug to the receiver URL to show the log bar
+    const DEBUG_MODE = location.hash.includes('debug');
+    if (DEBUG_MODE) statusBar.classList.add('visible');
+
+    let activePlayer     = null;
+    let statusHideTimer  = null;
+    let switchTimer      = null;
+    let nowPlayingTimer  = null;
+    let currentChannel   = '';
 
     /* ── Logging ──────────────────────────────────────────────────── */
     function log(msg) {
       console.log('[SupremeIPTV] ' + msg);
-      statusBar.textContent = msg;
-      statusBar.classList.remove('hidden');
+      if (DEBUG_MODE) {
+        statusBar.textContent = msg;
+        statusBar.classList.remove('fade');
+      }
     }
     function logThenHide(msg, delayMs = 4000) {
       log(msg);
-      clearTimeout(statusHideTimer);
-      statusHideTimer = setTimeout(() => statusBar.classList.add('hidden'), delayMs);
+      if (DEBUG_MODE) {
+        clearTimeout(statusHideTimer);
+        statusHideTimer = setTimeout(() => statusBar.classList.add('fade'), delayMs);
+      }
+    }
+
+    /* ── Channel-switching overlay ───────────────────────────────── */
+    function showSwitching(channelName) {
+      currentChannel = channelName || 'Loading…';
+      switchChName.textContent = currentChannel;
+      switchChSub.textContent = 'Switching channel';
+      switchOverlay.classList.add('visible');
+      clearTimeout(switchTimer);
+      // Safety: auto-hide after 12s in case playback events don't fire
+      switchTimer = setTimeout(() => hideSwitching(), 12000);
+    }
+    function hideSwitching() {
+      clearTimeout(switchTimer);
+      switchOverlay.classList.remove('visible');
+    }
+
+    /* ── Now Playing toast ───────────────────────────────────────── */
+    function showNowPlaying(name) {
+      nowPlaying.textContent = '▶ ' + (name || 'Playing');
+      nowPlaying.classList.add('visible');
+      clearTimeout(nowPlayingTimer);
+      nowPlayingTimer = setTimeout(() => nowPlaying.classList.remove('visible'), 3500);
+    }
+
+    /* ── Buffering badge ─────────────────────────────────────────── */
+    function setBuffering(on) {
+      if (on) bufferingBadge.classList.add('visible');
+      else    bufferingBadge.classList.remove('visible');
     }
 
     /* ── Player cleanup ───────────────────────────────────────────── */
@@ -153,7 +269,11 @@
         console.error('[SupremeIPTV] mpegts error', errType, errDetail, 'url=' + url);
         // Reconnect on network errors (CDN session expired, proxy dropped, etc.)
         if (errType === mpegts.ErrorTypes.NETWORK_ERROR || errType === mpegts.ErrorTypes.IO_ERROR) {
+          setBuffering(true);
           scheduleReconnect(3000, 'Network error');
+        } else {
+          hideSwitching();
+          setBuffering(false);
         }
       });
       activePlayer = p;
@@ -203,11 +323,14 @@
         const rawUrl = (media.contentUrl || media.contentId || '').trim();
         const ct     = (media.contentType || '').toLowerCase();
 
-        log('📥 LOAD: ' + rawUrl.substring(0, 80));
-        console.log('[SupremeIPTV] LOAD  url=' + rawUrl + '  ct=' + ct);
+        const channelName = loadRequestData.media?.metadata?.title || '';
+        const loadLabel = channelName ? ('📥 Loading: ' + channelName) : ('📥 LOAD: ' + rawUrl.substring(0, 80));
+        log(loadLabel);
+        console.log('[SupremeIPTV] LOAD  url=' + rawUrl + '  ct=' + ct + '  channel=' + channelName);
 
-        // Hide splash when media is requested
+        // Hide splash, show switching overlay
         overlay.classList.add('hidden');
+        showSwitching(channelName);
 
         // ── Raw MPEG-TS (.ts or video/mp2t, or proxy /api/stream URL) ─────────
         if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || rawUrl.includes('/api/stream')) {
@@ -237,11 +360,31 @@
     );
 
     /* ── Video events ─────────────────────────────────────────────── */
-    video.addEventListener('playing', () => logThenHide('✅ Playing', 3000));
-    video.addEventListener('waiting', () => log('⏳ Buffering…'));
-    video.addEventListener('stalled', () => log('⚠️ Stream stalled'));
-    video.addEventListener('ended',   () => { overlay.classList.remove('hidden'); log('Stream ended'); });
-    video.addEventListener('error',   () => {
+    video.addEventListener('playing', () => {
+      hideSwitching();
+      setBuffering(false);
+      showNowPlaying(currentChannel);
+      logThenHide('✅ Playing', 3000);
+    });
+    video.addEventListener('waiting', () => {
+      setBuffering(true);
+      log('⏳ Buffering…');
+    });
+    video.addEventListener('stalled', () => {
+      setBuffering(true);
+      log('⚠️ Stream stalled');
+    });
+    video.addEventListener('canplay', () => {
+      setBuffering(false);
+    });
+    video.addEventListener('ended', () => {
+      setBuffering(false);
+      overlay.classList.remove('hidden');
+      log('Stream ended');
+    });
+    video.addEventListener('error', () => {
+      hideSwitching();
+      setBuffering(false);
       const msg = video.error ? video.error.message : 'unknown error';
       log('❌ Video error: ' + msg);
       overlay.classList.remove('hidden');
