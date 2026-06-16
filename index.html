@@ -359,7 +359,23 @@
           return null; // We own playback — bypass CAF
         }
 
-        // ── Anything else (mp4, mkv, etc.) — delegate to CAF ──────
+        // ── HTTP mp4 — play directly via <video> to avoid CAF Range prefetch ──
+        // CAF always makes a Range request for the moov atom before starting playback.
+        // Many IPTV servers (e.g. kaiser1963.design) ignore Range and return HTTP 200
+        // with the full file → CAF expected 206 → IDLE/error after ~5s.
+        // Chrome's native <video> element handles HTTP 200 mp4 gracefully (progressive
+        // buffering) with no 5s penalty. Downside: phone loses seek/play-pause controls.
+        // HTTPS mp4 and mkv/avi/webm are NOT affected — they go to CAF below.
+        if (rawUrl.startsWith('http://') && /\.mp4($|\?)/i.test(rawUrl)) {
+          destroyPlayer();
+          log('🎬 HTTP mp4 → native <video> (bypass CAF Range prefetch)');
+          video.src = rawUrl;
+          video.play().catch(e => log('mp4 play() rejected: ' + e.message));
+          activePlayer = { destroy: () => { video.src = ''; video.load(); } };
+          return null;
+        }
+
+        // ── Anything else (HTTPS mp4, mkv, avi, webm) — delegate to CAF ──────
         // MUST destroy any active mpegts.js/HLS.js player first.
         // If a live stream was playing, it holds the <video> element.
         // CAF needs a clean video element or it goes IDLE immediately.
