@@ -356,6 +356,8 @@
         }
 
         // ── Anything else (mp4, mkv, etc.) — delegate to CAF ──────
+        // Clean up any active mpegts.js/hls.js player first so CAF gets a clean video element
+        destroyPlayer();
         log('📦 Delegating to CAF player: ' + rawUrl.substring(0, 60));
         return loadRequestData;
       }
