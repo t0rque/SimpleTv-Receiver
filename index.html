@@ -147,6 +147,7 @@
     let switchTimer      = null;
     let nowPlayingTimer  = null;
     let currentChannel   = '';
+    let isPlayingNow     = false; // true only after first 'playing' event for current stream
 
     /* ── Logging ──────────────────────────────────────────────────── */
     function log(msg) {
@@ -166,6 +167,7 @@
 
     /* ── Channel-switching overlay ───────────────────────────────── */
     function showSwitching(channelName) {
+      isPlayingNow = false; // reset playing state when switching channel
       currentChannel = channelName || 'Loading…';
       switchChName.textContent = currentChannel;
       switchChSub.textContent = 'Switching channel';
@@ -277,7 +279,20 @@
         }
       });
       activePlayer = p;
-      video.play().catch(e => log('play() rejected: ' + e.message));
+      // Defer play() until canplay — calling it immediately after p.load()
+      // causes "interrupted by load" rejection because the MediaSource isn't ready yet.
+      video.addEventListener('canplay', function playOnReady() {
+        video.removeEventListener('canplay', playOnReady);
+        if (activePlayer === p) {
+          video.play().catch(e => log('play() rejected: ' + e.message));
+        }
+      });
+      // Fallback: if canplay doesn't fire within 4s, try playing anyway
+      setTimeout(() => {
+        if (activePlayer === p && video.paused) {
+          video.play().catch(e => log('play() fallback rejected: ' + e.message));
+        }
+      }, 4000);
     }
 
     /* ── hls.js — HLS .m3u8 streams ──────────────────────────────── */
@@ -361,28 +376,33 @@
 
     /* ── Video events ─────────────────────────────────────────────── */
     video.addEventListener('playing', () => {
+      isPlayingNow = true;
       hideSwitching();
       setBuffering(false);
       showNowPlaying(currentChannel);
       logThenHide('✅ Playing', 3000);
     });
     video.addEventListener('waiting', () => {
-      setBuffering(true);
+      // Only show buffering badge if we were already playing — not during initial load
+      if (isPlayingNow) setBuffering(true);
       log('⏳ Buffering…');
     });
     video.addEventListener('stalled', () => {
-      setBuffering(true);
+      if (isPlayingNow) setBuffering(true);
       log('⚠️ Stream stalled');
     });
     video.addEventListener('canplay', () => {
       setBuffering(false);
+      hideSwitching(); // belt-and-suspenders: hide switch overlay once we have data
     });
     video.addEventListener('ended', () => {
+      isPlayingNow = false;
       setBuffering(false);
       overlay.classList.remove('hidden');
       log('Stream ended');
     });
     video.addEventListener('error', () => {
+      isPlayingNow = false;
       hideSwitching();
       setBuffering(false);
       const msg = video.error ? video.error.message : 'unknown error';
