@@ -263,6 +263,10 @@
         return;
       }
       log('▶️ mpegts.js: loading live stream…');
+      // Hide splash immediately — 'playing' event can take several seconds
+      // to fire on raw TS streams; don't leave user staring at the logo.
+      overlay.classList.add('hidden');
+      hideSwitching();
       const p = mpegts.createPlayer({
         type: 'mpegts',
         isLive: true,
@@ -460,10 +464,11 @@
     });
 
     /* ── Start ────────────────────────────────────────────────────── */
-    // idleTimeoutMs=0 disables the 5-minute CAF idle shutdown.
-    // When we return null from the LOAD interceptor (live TS streams), CAF's
-    // PlayerManager stays IDLE — without this, it kills the session after 5min.
-    context.start({ maxInactivity: 3600, idleTimeoutMs: 0 });
+    // idleTimeoutMs: 24h — prevents CAF killing the session when we own
+    // playback via mpegts.js (returning null from LOAD leaves PlayerManager
+    // IDLE; default 5min timeout kills the session otherwise).
+    // WARNING: do NOT use 0 — some Chromecast firmware treats 0 as "timeout immediately".
+    context.start({ maxInactivity: 3600, idleTimeoutMs: 86400000 });
     log('✅ SimpleTv Receiver ready  (35D1A927)');
     console.log('[SimpleTv] Receiver started — App ID 35D1A927');
   </script>
