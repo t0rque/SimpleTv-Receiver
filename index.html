@@ -387,6 +387,7 @@
 
     /* ── Video events ─────────────────────────────────────────────── */
     video.addEventListener('playing', () => {
+      overlay.classList.add('hidden');
       hideSwitching();
       setBuffering(false);
       showNowPlaying(currentChannel);
@@ -401,6 +402,7 @@
       log('⚠️ Stream stalled');
     });
     video.addEventListener('canplay', () => {
+      overlay.classList.add('hidden');
       setBuffering(false);
     });
     video.addEventListener('ended', () => {
@@ -413,6 +415,16 @@
       setBuffering(false);
       const msg = video.error ? video.error.message : 'unknown error';
       log('❌ Video error: ' + msg);
+
+      // Ignore transient/non-fatal errors if media is already playing.
+      // Some streams emit error events while audio/video continues.
+      const stillPlaying = !video.paused && !video.ended && video.readyState >= 2;
+      if (stillPlaying) {
+        log('ℹ️ Ignoring error event — media is still playing');
+        overlay.classList.add('hidden');
+        return;
+      }
+
       overlay.classList.remove('hidden');
     });
 
