@@ -303,11 +303,10 @@
       video.play().catch(e => log('play() rejected: ' + e.message));
 
       // ── Periodic memory refresh ────────────────────────────────────
-      // Chromecast has ~512MB RAM. MPEG-TS data accumulates even with
-      // autoCleanupSourceBuffer — the worker itself leaks. Full teardown
-      // every 20 minutes fully releases SourceBuffer + worker memory.
+      // Chromecast is rebooting in under 5 minutes on some live TS streams.
+      // Force a full teardown/recreate before that threshold to prevent OOM.
       // User sees a ~1-2s gap but stream continues from the live edge.
-      const MEM_REFRESH_MS = 20 * 60 * 1000; // 20 minutes
+      const MEM_REFRESH_MS = 4 * 60 * 1000; // 4 minutes
       memRefreshTimer = setTimeout(() => {
         memRefreshTimer = null;
         log('♻️ Periodic memory refresh — restarting player to prevent OOM');
