@@ -419,6 +419,11 @@
         clearTimeout(startupWatchdogTimer);
         startupWatchdogTimer = null;
       }
+      // Reset reconnect counter every time we successfully start playing.
+      // This means MAX_RECONNECTS is "5 consecutive failures", not "5 total
+      // over the lifetime of the session". Without this, a stream that drops
+      // and reconnects 5 times over ~5 minutes gives up permanently.
+      reconnectCount = 0;
       overlay.classList.add('hidden');
       hideSwitching();
       setBuffering(false);
