@@ -148,6 +148,7 @@
     let nowPlayingTimer  = null;
     let reconnectTimer   = null;  // module-level — cleared in destroyPlayer()
     let memRefreshTimer  = null;  // periodic player restart to prevent OOM on Chromecast
+    let startupWatchdogTimer = null; // catches silent startup stalls after recycle
     let reconnectCount   = 0;    // reset on each new channel load
     let currentChannel   = '';
 
@@ -207,12 +208,26 @@
         clearTimeout(memRefreshTimer);
         memRefreshTimer = null;
       }
-      reconnectCount = 0;
+      if (startupWatchdogTimer) {
+        clearTimeout(startupWatchdogTimer);
+        startupWatchdogTimer = null;
+      }
       if (!activePlayer) return;
       try { activePlayer.destroy(); } catch(e) {}
       activePlayer = null;
       video.src = '';
       video.load();
+    }
+
+    function withCacheBust(url) {
+      try {
+        const u = new URL(url);
+        u.searchParams.set('_cb', Date.now().toString());
+        return u.toString();
+      } catch (e) {
+        const sep = url.includes('?') ? '&' : '?';
+        return url + sep + '_cb=' + Date.now();
+      }
     }
 
     /* ── Resolve .ts redirect via fetch() ─────────────────────────
@@ -284,7 +299,7 @@
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
           log('🔄 Reconnecting mpegts stream…');
-          playMpegTs(url); // destroyPlayer() called inside — clears reconnectTimer + resets reconnectCount
+          playMpegTs(withCacheBust(url)); // force a fresh upstream session on reconnect
         }, delayMs);
       }
       p.on(mpegts.Events.ERROR, (errType, errDetail) => {
@@ -302,6 +317,16 @@
       activePlayer = p;
       video.play().catch(e => log('play() rejected: ' + e.message));
 
+      // Some streams hang in buffering after player recreate without firing ERROR.
+      // If playback hasn't started in 12s, force a fresh reconnect with cache-bust.
+      startupWatchdogTimer = setTimeout(() => {
+        startupWatchdogTimer = null;
+        const started = !video.paused && video.readyState >= 2;
+        if (started) return;
+        log('⏱️ Startup watchdog timeout — forcing reconnect');
+        scheduleReconnect(1000, 'Startup stall');
+      }, 12000);
+
       // ── Periodic memory refresh ────────────────────────────────────
       // Chromecast is rebooting in under 5 minutes on some live TS streams.
       // Force a full teardown/recreate before that threshold to prevent OOM.
@@ -310,7 +335,7 @@
       memRefreshTimer = setTimeout(() => {
         memRefreshTimer = null;
         log('♻️ Periodic memory refresh — restarting player to prevent OOM');
-        playMpegTs(url); // destroyPlayer() called inside, cancels all timers, then restarts
+        playMpegTs(withCacheBust(url)); // destroyPlayer() called inside, cancels all timers, then restarts
       }, MEM_REFRESH_MS);
     }
 
@@ -403,6 +428,10 @@
 
     /* ── Video events ─────────────────────────────────────────────── */
     video.addEventListener('playing', () => {
+      if (startupWatchdogTimer) {
+        clearTimeout(startupWatchdogTimer);
+        startupWatchdogTimer = null;
+      }
       overlay.classList.add('hidden');
       hideSwitching();
       setBuffering(false);
