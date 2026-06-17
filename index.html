@@ -253,7 +253,7 @@
         isLive: true,
         url: url,
       }, {
-        enableWorker: false,           // run in main thread — avoids worker memory accumulation on Chromecast
+        enableWorker: true,            // offload demuxing to worker — keeps main thread free for Cast framework heartbeats
         liveBufferLatencyChasing: true,
         liveSync: true,
         liveSyncMaxLatency: 6,
