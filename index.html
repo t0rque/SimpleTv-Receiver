@@ -147,6 +147,7 @@
     let switchTimer      = null;
     let nowPlayingTimer  = null;
     let reconnectTimer   = null;  // module-level — cleared in destroyPlayer()
+    let memRefreshTimer  = null;  // periodic player restart to prevent OOM on Chromecast
     let reconnectCount   = 0;    // reset on each new channel load
     let currentChannel   = '';
 
@@ -201,6 +202,10 @@
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
+      }
+      if (memRefreshTimer) {
+        clearTimeout(memRefreshTimer);
+        memRefreshTimer = null;
       }
       reconnectCount = 0;
       if (!activePlayer) return;
@@ -296,6 +301,18 @@
       });
       activePlayer = p;
       video.play().catch(e => log('play() rejected: ' + e.message));
+
+      // ── Periodic memory refresh ────────────────────────────────────
+      // Chromecast has ~512MB RAM. MPEG-TS data accumulates even with
+      // autoCleanupSourceBuffer — the worker itself leaks. Full teardown
+      // every 20 minutes fully releases SourceBuffer + worker memory.
+      // User sees a ~1-2s gap but stream continues from the live edge.
+      const MEM_REFRESH_MS = 20 * 60 * 1000; // 20 minutes
+      memRefreshTimer = setTimeout(() => {
+        memRefreshTimer = null;
+        log('♻️ Periodic memory refresh — restarting player to prevent OOM');
+        playMpegTs(url); // destroyPlayer() called inside, cancels all timers, then restarts
+      }, MEM_REFRESH_MS);
     }
 
     /* ── hls.js — HLS .m3u8 streams ──────────────────────────────── */
