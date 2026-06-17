@@ -147,7 +147,6 @@
     let switchTimer      = null;
     let nowPlayingTimer  = null;
     let reconnectTimer   = null;  // module-level — cleared in destroyPlayer()
-    let memRefreshTimer  = null;  // periodic player restart to prevent OOM on Chromecast
     let startupWatchdogTimer = null; // catches silent startup stalls after recycle
     let reconnectCount   = 0;    // reset on each new channel load
     let currentChannel   = '';
@@ -203,10 +202,6 @@
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
-      }
-      if (memRefreshTimer) {
-        clearTimeout(memRefreshTimer);
-        memRefreshTimer = null;
       }
       if (startupWatchdogTimer) {
         clearTimeout(startupWatchdogTimer);
@@ -276,12 +271,13 @@
         enableWorker: true,            // offload demuxing to worker — keeps main thread free for Cast framework heartbeats
         liveBufferLatencyChasing: true,
         liveSync: true,
-        liveSyncMaxLatency: 6,
-        liveBufferLatencyMaxLatency: 8,
+        liveSyncMaxLatency: 3,
+        liveBufferLatencyMaxLatency: 4,
         enableStashBuffer: false,
+        lazyLoad: false,
         autoCleanupSourceBuffer: true,  // evict old live data from MSE SourceBuffer — prevents OOM crash
-        autoCleanupMinBackwardDuration: 30,  // keep 30s behind playhead
-        autoCleanupMaxBackwardDuration: 60,  // force evict anything > 60s old
+        autoCleanupMinBackwardDuration: 8,   // keep only a small tail behind live edge
+        autoCleanupMaxBackwardDuration: 15,  // aggressively evict old buffered media
       });
       p.attachMediaElement(video);
       p.load();
@@ -327,16 +323,6 @@
         scheduleReconnect(1000, 'Startup stall');
       }, 12000);
 
-      // ── Periodic memory refresh ────────────────────────────────────
-      // Chromecast is rebooting in under 5 minutes on some live TS streams.
-      // Force a full teardown/recreate before that threshold to prevent OOM.
-      // User sees a ~1-2s gap but stream continues from the live edge.
-      const MEM_REFRESH_MS = 4 * 60 * 1000; // 4 minutes
-      memRefreshTimer = setTimeout(() => {
-        memRefreshTimer = null;
-        log('♻️ Periodic memory refresh — restarting player to prevent OOM');
-        playMpegTs(withCacheBust(url)); // destroyPlayer() called inside, cancels all timers, then restarts
-      }, MEM_REFRESH_MS);
     }
 
     /* ── hls.js — HLS .m3u8 streams ──────────────────────────────── */
