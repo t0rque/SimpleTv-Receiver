@@ -146,6 +146,8 @@
     let statusHideTimer  = null;
     let switchTimer      = null;
     let nowPlayingTimer  = null;
+    let reconnectTimer   = null;  // module-level — cleared in destroyPlayer()
+    let reconnectCount   = 0;    // reset on each new channel load
     let currentChannel   = '';
 
     /* ── Logging ──────────────────────────────────────────────────── */
@@ -195,6 +197,12 @@
 
     /* ── Player cleanup ───────────────────────────────────────────── */
     function destroyPlayer() {
+      // Cancel any pending reconnect — prevents zombie timers destroying the next channel's player
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      reconnectCount = 0;
       if (!activePlayer) return;
       try { activePlayer.destroy(); } catch(e) {}
       activePlayer = null;
@@ -245,23 +253,33 @@
         isLive: true,
         url: url,
       }, {
-        enableWorker: true,
+        enableWorker: false,           // run in main thread — avoids worker memory accumulation on Chromecast
         liveBufferLatencyChasing: true,
         liveSync: true,
         liveSyncMaxLatency: 6,
         liveBufferLatencyMaxLatency: 8,
         enableStashBuffer: false,
+        autoCleanupSourceBuffer: true,  // evict old live data from MSE SourceBuffer — prevents OOM crash
+        autoCleanupMinBackwardDuration: 30,  // keep 30s behind playhead
+        autoCleanupMaxBackwardDuration: 60,  // force evict anything > 60s old
       });
       p.attachMediaElement(video);
       p.load();
-      let reconnectTimer = null;
+      const MAX_RECONNECTS = 5;
       function scheduleReconnect(delayMs, reason) {
         if (reconnectTimer) return; // already scheduled
-        log('🔄 ' + reason + ' — reconnecting in ' + (delayMs / 1000).toFixed(0) + 's…');
+        if (reconnectCount >= MAX_RECONNECTS) {
+          log('❌ Max reconnects reached — giving up');
+          hideSwitching();
+          setBuffering(false);
+          return;
+        }
+        reconnectCount++;
+        log('🔄 ' + reason + ' — reconnecting in ' + (delayMs / 1000).toFixed(0) + 's… (attempt ' + reconnectCount + '/' + MAX_RECONNECTS + ')');
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
           log('🔄 Reconnecting mpegts stream…');
-          playMpegTs(url); // destroyPlayer() is called inside, resets everything
+          playMpegTs(url); // destroyPlayer() called inside — clears reconnectTimer + resets reconnectCount
         }, delayMs);
       }
       p.on(mpegts.Events.ERROR, (errType, errDetail) => {
@@ -328,11 +346,9 @@
         log(loadLabel);
         console.log('[SupremeIPTV] LOAD  url=' + rawUrl + '  ct=' + ct + '  channel=' + channelName);
 
-        // Hide splash, show switching overlay
-        overlay.classList.add('hidden');
-        showSwitching(channelName);
+      // Reset reconnect counter for new channel
+      reconnectCount = 0;
 
-        // ── Raw MPEG-TS (.ts or video/mp2t, or proxy /api/stream URL) ─────────
         // For proxy URLs (/api/stream?url=...), decode the underlying URL to check
         // its extension. mp4/mkv/avi/webm proxy URLs must go to CAF, not mpegts.js.
         let isLiveProxy = false;
