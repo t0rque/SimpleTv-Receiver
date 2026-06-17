@@ -429,7 +429,10 @@
     });
 
     /* ── Start ────────────────────────────────────────────────────── */
-    context.start({ maxInactivity: 3600 });
+    // idleTimeoutMs=0 disables the 5-minute CAF idle shutdown.
+    // When we return null from the LOAD interceptor (live TS streams), CAF's
+    // PlayerManager stays IDLE — without this, it kills the session after 5min.
+    context.start({ maxInactivity: 3600, idleTimeoutMs: 0 });
     log('✅ SimpleTv Receiver ready  (35D1A927)');
     console.log('[SimpleTv] Receiver started — App ID 35D1A927');
   </script>
