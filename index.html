@@ -272,16 +272,13 @@
         isLive: true,
         url: url,
       }, {
-        enableWorker: true,            // offload demuxing to worker — keeps main thread free for Cast framework heartbeats
-        liveBufferLatencyChasing: true,
-        liveSync: true,
-        liveSyncMaxLatency: 3,
-        liveBufferLatencyMaxLatency: 4,
-        enableStashBuffer: false,
+        enableWorker: true,         // offload demuxing to worker — keeps main thread free for Cast framework heartbeats
+        enableStashBuffer: true,    // internal fetch buffer smooths data on slow/older devices
+        liveBufferLatencyChasing: false, // don't aggressively seek to live edge — old Chromecast stalls if seeked before enough buffer
         lazyLoad: false,
-        autoCleanupSourceBuffer: true,  // evict old live data from MSE SourceBuffer — prevents OOM crash
-        autoCleanupMinBackwardDuration: 8,   // keep only a small tail behind live edge
-        autoCleanupMaxBackwardDuration: 15,  // aggressively evict old buffered media
+        autoCleanupSourceBuffer: true,  // evict old data from MSE SourceBuffer — prevents OOM
+        autoCleanupMinBackwardDuration: 30,  // mpegts.js default — safe for all device generations
+        autoCleanupMaxBackwardDuration: 60,  // mpegts.js default — won't evict until 60s behind
       });
       p.attachMediaElement(video);
       p.load();
