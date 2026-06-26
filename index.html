@@ -150,6 +150,10 @@
     let startupWatchdogTimer = null; // catches silent startup stalls after recycle
     let reconnectCount   = 0;    // reset on each new channel load
     let currentChannel   = '';
+    let liveRefreshTimer = null;
+    let currentLiveOriginalUrl = '';
+    let currentLiveMode = null;
+    const LIVE_REFRESH_MS = 4 * 60 * 1000;
 
     /* ── Logging ──────────────────────────────────────────────────── */
     function log(msg) {
@@ -196,6 +200,42 @@
       else    bufferingBadge.classList.remove('visible');
     }
 
+    function clearLiveRefreshTimer() {
+      if (liveRefreshTimer) {
+        clearTimeout(liveRefreshTimer);
+        liveRefreshTimer = null;
+      }
+    }
+
+    async function refreshLiveStream(reason) {
+      clearLiveRefreshTimer();
+      if (!currentLiveOriginalUrl || !currentLiveMode) {
+        log('ℹ️ Live refresh skipped — no original live URL available');
+        return;
+      }
+      try {
+        log('🔄 ' + reason + ' — refreshing live stream token…');
+        const refreshedUrl = await resolveRedirect(withCacheBust(currentLiveOriginalUrl));
+        if (currentLiveMode === 'hls') {
+          playHls(refreshedUrl, currentLiveOriginalUrl);
+        } else {
+          playMpegTs(refreshedUrl, currentLiveOriginalUrl);
+        }
+      } catch (e) {
+        log('⚠️ Live refresh failed: ' + (e && e.message ? e.message : e));
+      }
+    }
+
+    function scheduleLiveRefresh() {
+      clearLiveRefreshTimer();
+      if (!currentLiveOriginalUrl || !currentLiveMode) return;
+      liveRefreshTimer = setTimeout(() => {
+        liveRefreshTimer = null;
+        refreshLiveStream('Proactive refresh before token expiry');
+      }, LIVE_REFRESH_MS);
+      log('⏱️ Live refresh scheduled in ' + Math.round(LIVE_REFRESH_MS / 1000) + 's');
+    }
+
     /* ── Player cleanup ───────────────────────────────────────────── */
     function destroyPlayer() {
       // Cancel any pending reconnect — prevents zombie timers destroying the next channel's player
@@ -203,6 +243,7 @@
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      clearLiveRefreshTimer();
       if (startupWatchdogTimer) {
         clearTimeout(startupWatchdogTimer);
         startupWatchdogTimer = null;
@@ -254,12 +295,15 @@
     }
 
     /* ── mpegts.js — raw MPEG-TS live streams ─────────────────────── */
-    function playMpegTs(url) {
+    function playMpegTs(url, originalLiveUrl = '') {
       destroyPlayer();
+      currentLiveOriginalUrl = originalLiveUrl || currentLiveOriginalUrl || '';
+      currentLiveMode = 'mpegts';
       if (typeof mpegts === 'undefined' || !mpegts.isSupported()) {
         log('⚠️ mpegts.js not supported — trying native video element');
         video.src = url;
         video.play().catch(e => log('native play error: ' + e.message));
+        scheduleLiveRefresh();
         return;
       }
       log('▶️ mpegts.js: loading live stream…');
@@ -295,8 +339,7 @@
         log('🔄 ' + reason + ' — reconnecting in ' + (delayMs / 1000).toFixed(0) + 's… (attempt ' + reconnectCount + '/' + MAX_RECONNECTS + ')');
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
-          log('🔄 Reconnecting mpegts stream…');
-          playMpegTs(withCacheBust(url)); // force a fresh upstream session on reconnect
+          refreshLiveStream('Reconnect after stream failure');
         }, delayMs);
       }
       p.on(mpegts.Events.ERROR, (errType, errDetail) => {
@@ -324,15 +367,20 @@
         scheduleReconnect(1000, 'Startup stall');
       }, 12000);
 
+      scheduleLiveRefresh();
+
     }
 
     /* ── hls.js — HLS .m3u8 streams ──────────────────────────────── */
-    function playHls(url) {
+    function playHls(url, originalLiveUrl = '') {
       destroyPlayer();
+      currentLiveOriginalUrl = originalLiveUrl || currentLiveOriginalUrl || '';
+      currentLiveMode = 'hls';
       if (!Hls.isSupported()) {
         log('▶️ Using native HLS (Hls.js not supported)');
         video.src = url;
         video.play().catch(e => log('native play error: ' + e.message));
+        scheduleLiveRefresh();
         return;
       }
       log('▶️ hls.js: loading HLS stream…');
@@ -353,9 +401,11 @@
         if (data.fatal) {
           log('❌ HLS fatal error: ' + data.type);
           console.error('[SupremeIPTV] HLS fatal', data);
+          refreshLiveStream('Fatal HLS error');
         }
       });
       activePlayer = h;
+      scheduleLiveRefresh();
     }
 
     /* ── Cast LOAD interceptor ────────────────────────────────────── */
@@ -368,6 +418,8 @@
         const media  = loadRequestData.media;
         const rawUrl = (media.contentUrl || media.contentId || '').trim();
         const ct     = (media.contentType || '').toLowerCase();
+        const customData = media.customData || {};
+        const originalLiveUrl = (customData.originalLiveUrl || '').trim();
 
         const channelName = loadRequestData.media?.metadata?.title || '';
         const loadLabel = channelName ? ('📥 Loading: ' + channelName) : ('📥 LOAD: ' + rawUrl.substring(0, 80));
@@ -393,13 +445,13 @@
           //   1. http://192.168.x.x:PORT/stream  — local phone proxy (LAN)
           //   2. https://proxy/api/stream?url=...ts  — Cloudflare Worker (live TS only)
           log('📡 MPEG-TS stream → mpegts.js');
-          playMpegTs(rawUrl);
+          playMpegTs(rawUrl, originalLiveUrl);
           return null; // We own playback — bypass CAF
         }
 
         // ── HLS (.m3u8 or application/*mpegurl) ───────────────────
         if (/\.m3u8($|\?)/i.test(rawUrl) || ct.includes('mpegurl')) {
-          playHls(rawUrl);
+          playHls(rawUrl, originalLiveUrl || rawUrl);
           return null; // We own playback — bypass CAF
         }
 
@@ -407,6 +459,8 @@
         // MUST destroy any active mpegts.js/HLS.js player first.
         // If a live stream was playing, it holds the <video> element.
         // CAF needs a clean video element or it goes IDLE immediately.
+        currentLiveOriginalUrl = '';
+        currentLiveMode = null;
         destroyPlayer();
         log('📦 Delegating to CAF player: ' + rawUrl.substring(0, 60));
         return loadRequestData;
