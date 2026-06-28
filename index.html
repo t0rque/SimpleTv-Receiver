@@ -441,11 +441,20 @@
           }
         }
         if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || isLiveProxy) {
-          // URL types we may receive:
-          //   1. http://192.168.x.x:PORT/stream  — local phone proxy (LAN)
-          //   2. https://proxy/api/stream?url=...ts  — Cloudflare Worker (live TS only)
           log('📡 MPEG-TS stream → mpegts.js');
-          playMpegTs(rawUrl, originalLiveUrl);
+          // For bare .ts URLs: resolve the redirect from Chromecast's own residential IP.
+          // The CDN token is then tied to Chromecast's IP, not a datacenter IP, so the
+          // stream stays alive indefinitely (no ~5s IP-mismatch drop from CF proxy).
+          // isLiveProxy URLs are already CF proxy URLs — play them directly as before.
+          if (/\.ts($|\?)/i.test(rawUrl) && !isLiveProxy) {
+            resolveRedirect(withCacheBust(rawUrl)).then(resolvedUrl => {
+              playMpegTs(resolvedUrl, rawUrl);
+            }).catch(() => {
+              playMpegTs(rawUrl, rawUrl); // fallback to direct on fetch error
+            });
+          } else {
+            playMpegTs(rawUrl, originalLiveUrl);
+          }
           return null; // We own playback — bypass CAF
         }
 
