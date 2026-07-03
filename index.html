@@ -299,15 +299,19 @@
        response.url is the final URL after all hops.              */
     async function resolveRedirect(url) {
       log('🔍 Resolving redirect for ' + url.substring(0, 60) + '…');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
       try {
         const resp = await fetch(url, {
           method: 'GET',
           redirect: 'follow',
+          signal: controller.signal,
           headers: {
             'User-Agent': 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1',
             'Accept': '*/*',
           },
         });
+        clearTimeout(timeoutId);
         if (resp.body) resp.body.cancel().catch(() => {});
         const finalUrl = resp.url || url;
         if (finalUrl !== url) {
@@ -317,7 +321,9 @@
         }
         return finalUrl;
       } catch(e) {
-        log('⚠️ Redirect fetch failed (' + e.message + ') — using original');
+        clearTimeout(timeoutId);
+        const reason = e.name === 'AbortError' ? 'timeout (8s)' : e.message;
+        log('⚠️ Redirect fetch failed (' + reason + ') — using original');
         return url;
       }
     }
@@ -544,8 +550,15 @@
       const msg = video.error ? video.error.message : 'unknown error';
       log('❌ Video error: ' + msg);
 
+      // If mpegts.js or hls.js is managing the stream, don't re-show the overlay.
+      // Those players have their own reconnect logic — showing the splash here causes
+      // a "Ready to cast…" screen that never goes away during reconnect attempts.
+      if (currentLiveMode && activePlayer) {
+        log('ℹ️ Video error while custom player active — letting player handle reconnect');
+        return;
+      }
+
       // Ignore transient/non-fatal errors if media is already playing.
-      // Some streams emit error events while audio/video continues.
       const stillPlaying = !video.paused && !video.ended && video.readyState >= 2;
       if (stillPlaying) {
         log('ℹ️ Ignoring error event — media is still playing');
@@ -566,7 +579,7 @@
     context.addCustomMessageListener(HEARTBEAT_NS, () => {
       // Sender responded — session is alive
     });
-    context.start({ disableIdleTimeout: true, idleTimeoutMs: 86400000, maxInactivity: 0 });
+    context.start({ disableIdleTimeout: true, idleTimeoutMs: 86400000, maxInactivity: 3600 });
     log('✅ SimpleTv Receiver ready  (35D1A927)');
     console.log('[SimpleTv] Receiver started — App ID 35D1A927');
   </script>
