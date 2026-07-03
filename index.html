@@ -242,11 +242,11 @@
       }
       try {
         log('🔄 ' + reason + ' — refreshing live stream token…');
-        const refreshedUrl = await resolveRedirect(withCacheBust(currentLiveOriginalUrl));
+        const refreshUrl = withCacheBust(currentLiveOriginalUrl);
         if (currentLiveMode === 'hls') {
-          playHls(refreshedUrl, currentLiveOriginalUrl);
+          playHls(refreshUrl, currentLiveOriginalUrl);
         } else {
-          playMpegTs(refreshedUrl, currentLiveOriginalUrl);
+          playMpegTs(refreshUrl, currentLiveOriginalUrl);
         }
       } catch (e) {
         log('⚠️ Live refresh failed: ' + (e && e.message ? e.message : e));
@@ -294,100 +294,45 @@
       }
     }
 
-    /* ── Resolve .ts redirect via fetch() ─────────────────────────
-       Chromecast Chromium follows 302 redirects automatically.
-       response.url is the final URL after all hops.              */
-    async function resolveRedirect(url) {
-      log('🔍 Resolving redirect for ' + url.substring(0, 60) + '…');
-      try {
-        const resp = await fetch(url, {
-          method: 'GET',
-          redirect: 'follow',
-          headers: {
-            'User-Agent': 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1',
-            'Accept': '*/*',
-          },
-        });
-        if (resp.body) resp.body.cancel().catch(() => {});
-        const finalUrl = resp.url || url;
-        if (finalUrl !== url) {
-          log('✅ Redirected → ' + finalUrl.substring(0, 70));
-        } else {
-          log('⚠️ No redirect — using original URL');
-        }
-        return finalUrl;
-      } catch(e) {
-        log('⚠️ Redirect fetch failed (' + (e.message || e) + ') — using original');
-        return url;
+    /* ── Reconnect helper (shared across live stream types) ─────────
+       Defined at module level so the video error handler can call it.
+       mpegts.js's internal fetch() is blocked by CORS on IPTV servers
+       (they don't set Access-Control-Allow-Origin). <video src> is
+       passive media and bypasses CORS — so we use that instead.     */
+    const MAX_RECONNECTS = 5;
+    function scheduleReconnect(delayMs, reason) {
+      if (reconnectTimer) return; // already scheduled
+      if (reconnectCount >= MAX_RECONNECTS) {
+        log('❌ Max reconnects reached — giving up');
+        hideSwitching();
+        setBuffering(false);
+        return;
       }
+      reconnectCount++;
+      log('🔄 ' + reason + ' — reconnecting in ' + (delayMs / 1000).toFixed(0) + 's… (attempt ' + reconnectCount + '/' + MAX_RECONNECTS + ')');
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        refreshLiveStream('Reconnect after stream failure');
+      }, delayMs);
     }
 
-    /* ── mpegts.js — raw MPEG-TS live streams ─────────────────────── */
+    /* ── MPEG-TS live streams — native <video src> ────────────────────
+       Why NOT mpegts.js: its internal fetch() is a cross-origin
+       JavaScript request. IPTV servers have no CORS headers, so the
+       browser silently blocks the response → permanent buffering.
+       <video src> is passive media — CORS is NOT enforced — and the
+       browser follows CDN 302 redirects natively, tying the session
+       token to the Chromecast IP automatically (no proxy needed).    */
     function playMpegTs(url, originalLiveUrl = '') {
       destroyPlayer();
       currentLiveOriginalUrl = originalLiveUrl || currentLiveOriginalUrl || '';
       currentLiveMode = 'mpegts';
-      if (typeof mpegts === 'undefined' || !mpegts.isSupported()) {
-        log('⚠️ mpegts.js not supported — trying native video element');
-        video.src = url;
-        video.play().catch(e => log('native play error: ' + e.message));
-        startHeartbeat();
-        return;
-      }
-      log('▶️ mpegts.js: loading live stream…');
-      // Hide splash immediately — 'playing' event can take several seconds
-      // to fire on raw TS streams; don't leave user staring at the logo.
       overlay.classList.add('hidden');
       hideSwitching();
-      const p = mpegts.createPlayer({
-        type: 'mpegts',
-        isLive: true,
-        url: url,
-      }, {
-        enableWorker: true,         // offload demuxing to worker — keeps main thread free for Cast framework heartbeats
-        enableStashBuffer: true,    // internal fetch buffer smooths data on slow/older devices
-        liveBufferLatencyChasing: false, // don't aggressively seek to live edge — old Chromecast stalls if seeked before enough buffer
-        lazyLoad: false,
-        autoCleanupSourceBuffer: true,  // evict old data from MSE SourceBuffer — prevents OOM
-        autoCleanupMinBackwardDuration: 30,  // mpegts.js default — safe for all device generations
-        autoCleanupMaxBackwardDuration: 60,  // mpegts.js default — won't evict until 60s behind
-      });
-      p.attachMediaElement(video);
-      p.load();
-      const MAX_RECONNECTS = 5;
-      function scheduleReconnect(delayMs, reason) {
-        if (reconnectTimer) return; // already scheduled
-        if (reconnectCount >= MAX_RECONNECTS) {
-          log('❌ Max reconnects reached — giving up');
-          hideSwitching();
-          setBuffering(false);
-          return;
-        }
-        reconnectCount++;
-        log('🔄 ' + reason + ' — reconnecting in ' + (delayMs / 1000).toFixed(0) + 's… (attempt ' + reconnectCount + '/' + MAX_RECONNECTS + ')');
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = null;
-          refreshLiveStream('Reconnect after stream failure');
-        }, delayMs);
-      }
-      p.on(mpegts.Events.ERROR, (errType, errDetail) => {
-        log('❌ mpegts error: ' + errType + ' / ' + errDetail);
-        console.error('[SupremeIPTV] mpegts error', errType, errDetail, 'url=' + url);
-        // Reconnect on network errors (CDN session expired, proxy dropped, etc.)
-        if (errType === mpegts.ErrorTypes.NETWORK_ERROR || errType === mpegts.ErrorTypes.IO_ERROR) {
-          setBuffering(true);
-          scheduleReconnect(3000, 'Network error');
-        } else {
-          hideSwitching();
-          setBuffering(false);
-        }
-      });
-      activePlayer = p;
+      log('▶️ Live stream → native video: ' + url.substring(0, 60));
+      video.src = url;
       video.play().catch(e => log('play() rejected: ' + e.message));
-
-      // Some streams hang in buffering after player recreate without firing ERROR.
-      // 25s gives slow IPTV providers enough time to start delivering data before
-      // we attempt a reconnect (12s was too aggressive and caused infinite loops).
+      // Startup watchdog: if playback hasn't started in 25s, force reconnect
       startupWatchdogTimer = setTimeout(() => {
         startupWatchdogTimer = null;
         const started = !video.paused && video.readyState >= 2;
@@ -395,9 +340,7 @@
         log('⏱️ Startup watchdog timeout — forcing reconnect');
         scheduleReconnect(1000, 'Startup stall');
       }, 25000);
-
       startHeartbeat();
-
     }
 
     /* ── hls.js — HLS .m3u8 streams ──────────────────────────────── */
@@ -546,15 +489,16 @@
       const msg = video.error ? video.error.message : 'unknown error';
       log('❌ Video error: ' + msg);
 
-      // If mpegts.js or hls.js is managing the stream, don't re-show the overlay.
-      // Those players have their own reconnect logic — showing the splash here causes
-      // a "Ready to cast…" screen that never goes away during reconnect attempts.
-      if (currentLiveMode && activePlayer) {
-        log('ℹ️ Video error while custom player active — letting player handle reconnect');
+      // Live stream error — schedule reconnect instead of showing overlay.
+      // (activePlayer is null for MPEG-TS since we use <video src> not mpegts.js;
+      //  hls.js handles its own reconnect via Events.ERROR, but guard here too.)
+      if (currentLiveMode) {
+        log('🔄 Live stream error — scheduling reconnect');
+        scheduleReconnect(3000, 'Stream error');
         return;
       }
 
-      // Ignore transient/non-fatal errors if media is already playing.
+      // Non-live (movie/VOD): ignore if media is actually playing fine
       const stillPlaying = !video.paused && !video.ended && video.readyState >= 2;
       if (stillPlaying) {
         log('ℹ️ Ignoring error event — media is still playing');
