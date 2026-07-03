@@ -476,19 +476,12 @@
           // stream stays alive indefinitely (no ~5s IP-mismatch drop from CF proxy).
           // isLiveProxy URLs are already CF proxy URLs — play them directly as before.
           if (/\.ts($|\?)/i.test(rawUrl) && !isLiveProxy) {
-            // resolveRedirect uses a cache-busted URL so the probe fetch uses a DIFFERENT
-            // URL than what mpegts.js will request. This avoids double-connection issues on
-            // IPTV servers that enforce a 1-connection-per-user limit: the probe connection
-            // closes, and mpegts.js opens a fresh connection on the original (un-busted) URL.
-            // If a real CDN redirect happened, we use the redirected CDN URL for both.
-            const resolveUrl = withCacheBust(rawUrl);
-            resolveRedirect(resolveUrl).then(resolvedUrl => {
-              // redirect happened → use CDN URL; no redirect → use original rawUrl (not cache-busted)
-              const playUrl = (resolvedUrl === resolveUrl) ? rawUrl : resolvedUrl;
-              playMpegTs(playUrl, rawUrl);
-            }).catch(() => {
-              playMpegTs(rawUrl, rawUrl); // fallback to direct on fetch error
-            });
+            // Pass the original URL directly to mpegts.js — it uses fetch(redirect:'follow')
+            // internally, so any CDN redirect is followed from the Chromecast's own IP.
+            // The CDN token is therefore tied to Chromecast's IP automatically.
+            // A separate resolveRedirect probe is unnecessary and causes double-connection
+            // failures on IPTV servers with per-user connection limits.
+            playMpegTs(rawUrl, rawUrl);
           } else {
             playMpegTs(rawUrl, originalLiveUrl);
           }
