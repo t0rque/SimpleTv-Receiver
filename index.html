@@ -295,10 +295,8 @@
     }
 
     /* ── Reconnect helper (shared across live stream types) ─────────
-       Defined at module level so the video error handler can call it.
-       mpegts.js's internal fetch() is blocked by CORS on IPTV servers
-       (they don't set Access-Control-Allow-Origin). <video src> is
-       passive media and bypasses CORS — so we use that instead.     */
+       Defined at module level so both mpegts.js error handler and the
+       video element error handler can call it.                       */
     const MAX_RECONNECTS = 5;
     function scheduleReconnect(delayMs, reason) {
       if (reconnectTimer) return; // already scheduled
@@ -316,22 +314,64 @@
       }, delayMs);
     }
 
-    /* ── MPEG-TS live streams — native <video src> ────────────────────
-       Why NOT mpegts.js: its internal fetch() is a cross-origin
-       JavaScript request. IPTV servers have no CORS headers, so the
-       browser silently blocks the response → permanent buffering.
-       <video src> is passive media — CORS is NOT enforced — and the
-       browser follows CDN 302 redirects natively, tying the session
-       token to the Chromecast IP automatically (no proxy needed).    */
+    /* ── MPEG-TS live streams ─────────────────────────────────────────
+       Two strategies depending on URL type:
+       
+       CF proxy URLs (/api/stream):
+         → mpegts.js via fetch().
+         The proxy returns HTTPS + Access-Control-Allow-Origin:* +
+         Transfer-Encoding:chunked. mpegts.js handles chunked streams
+         perfectly via fetch()+ReadableStream. <video src> stalls on
+         chunked live streams (expects Content-Length that never arrives).
+       
+       Direct HTTP IPTV URLs:
+         → <video src> (passive media, CORS not enforced).
+         mpegts.js fetch() from an HTTPS receiver to an HTTP IPTV server
+         is blocked by CORS — IPTV servers have no CORS headers.
+         <video src> bypasses CORS and plays the stream natively.        */
     function playMpegTs(url, originalLiveUrl = '') {
       destroyPlayer();
       currentLiveOriginalUrl = originalLiveUrl || currentLiveOriginalUrl || '';
       currentLiveMode = 'mpegts';
       overlay.classList.add('hidden');
       hideSwitching();
-      log('▶️ Live stream → native video: ' + url.substring(0, 60));
-      video.src = url;
-      video.play().catch(e => log('play() rejected: ' + e.message));
+
+      const isProxy = url.includes('/api/stream');
+
+      if (isProxy && typeof mpegts !== 'undefined' && mpegts.isSupported()) {
+        log('▶️ mpegts.js (CF proxy): ' + url.substring(0, 60));
+        const p = mpegts.createPlayer({
+          type: 'mpegts',
+          isLive: true,
+          url: url,
+        }, {
+          enableWorker: true,
+          enableStashBuffer: true,
+          liveBufferLatencyChasing: false,
+          lazyLoad: false,
+          autoCleanupSourceBuffer: true,
+          autoCleanupMinBackwardDuration: 30,
+          autoCleanupMaxBackwardDuration: 60,
+        });
+        p.attachMediaElement(video);
+        p.load();
+        p.on(mpegts.Events.ERROR, (errType, errDetail) => {
+          log('❌ mpegts error: ' + errType + ' / ' + errDetail);
+          if (errType === mpegts.ErrorTypes.NETWORK_ERROR || errType === mpegts.ErrorTypes.IO_ERROR) {
+            setBuffering(true);
+            scheduleReconnect(3000, 'Network error');
+          } else {
+            setBuffering(false);
+          }
+        });
+        activePlayer = p;
+        video.play().catch(e => log('play() rejected: ' + e.message));
+      } else {
+        log('▶️ native video (direct HTTP): ' + url.substring(0, 60));
+        video.src = url;
+        video.play().catch(e => log('play() rejected: ' + e.message));
+      }
+
       // Startup watchdog: if playback hasn't started in 25s, force reconnect
       startupWatchdogTimer = setTimeout(() => {
         startupWatchdogTimer = null;
@@ -489,9 +529,13 @@
       const msg = video.error ? video.error.message : 'unknown error';
       log('❌ Video error: ' + msg);
 
-      // Live stream error — schedule reconnect instead of showing overlay.
-      // (activePlayer is null for MPEG-TS since we use <video src> not mpegts.js;
-      //  hls.js handles its own reconnect via Events.ERROR, but guard here too.)
+      // Live stream error handling:
+      //   mpegts.js active (activePlayer set) → let mpegts.js handle via Events.ERROR
+      //   video.src active (activePlayer null) → schedule reconnect here
+      if (currentLiveMode && activePlayer) {
+        log('ℹ️ Video error while mpegts.js active — letting it handle reconnect');
+        return;
+      }
       if (currentLiveMode) {
         log('🔄 Live stream error — scheduling reconnect');
         scheduleReconnect(3000, 'Stream error');
