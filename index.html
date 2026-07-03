@@ -299,19 +299,15 @@
        response.url is the final URL after all hops.              */
     async function resolveRedirect(url) {
       log('🔍 Resolving redirect for ' + url.substring(0, 60) + '…');
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
       try {
         const resp = await fetch(url, {
           method: 'GET',
           redirect: 'follow',
-          signal: controller.signal,
           headers: {
             'User-Agent': 'ExoPlayer/2.18.1 (Linux;Android 13) ExoPlayerLib/2.18.1',
             'Accept': '*/*',
           },
         });
-        clearTimeout(timeoutId);
         if (resp.body) resp.body.cancel().catch(() => {});
         const finalUrl = resp.url || url;
         if (finalUrl !== url) {
@@ -321,9 +317,7 @@
         }
         return finalUrl;
       } catch(e) {
-        clearTimeout(timeoutId);
-        const reason = e.name === 'AbortError' ? 'timeout (8s)' : e.message;
-        log('⚠️ Redirect fetch failed (' + reason + ') — using original');
+        log('⚠️ Redirect fetch failed (' + (e.message || e) + ') — using original');
         return url;
       }
     }
@@ -482,11 +476,16 @@
           // stream stays alive indefinitely (no ~5s IP-mismatch drop from CF proxy).
           // isLiveProxy URLs are already CF proxy URLs — play them directly as before.
           if (/\.ts($|\?)/i.test(rawUrl) && !isLiveProxy) {
-            // Use rawUrl as-is for redirect resolution — withCacheBust on the initial URL
-            // can break CDN token auth and cause double-connection issues on servers with
-            // per-user connection limits. Cache-bust is only needed on REFRESH calls.
-            resolveRedirect(rawUrl).then(resolvedUrl => {
-              playMpegTs(resolvedUrl, rawUrl);
+            // resolveRedirect uses a cache-busted URL so the probe fetch uses a DIFFERENT
+            // URL than what mpegts.js will request. This avoids double-connection issues on
+            // IPTV servers that enforce a 1-connection-per-user limit: the probe connection
+            // closes, and mpegts.js opens a fresh connection on the original (un-busted) URL.
+            // If a real CDN redirect happened, we use the redirected CDN URL for both.
+            const resolveUrl = withCacheBust(rawUrl);
+            resolveRedirect(resolveUrl).then(resolvedUrl => {
+              // redirect happened → use CDN URL; no redirect → use original rawUrl (not cache-busted)
+              const playUrl = (resolvedUrl === resolveUrl) ? rawUrl : resolvedUrl;
+              playMpegTs(playUrl, rawUrl);
             }).catch(() => {
               playMpegTs(rawUrl, rawUrl); // fallback to direct on fetch error
             });
@@ -574,16 +573,14 @@
     });
 
     /* ── Start ────────────────────────────────────────────────────── */
-    // disableIdleTimeout: true  — definitive way to prevent CAF killing the session
-    //   when we own playback (returning null from LOAD leaves PlayerManager IDLE;
-    //   the default 5-min idleTimeoutMs fires even with explicit large values).
-    // idleTimeoutMs: 86400000   — belt-and-suspenders large value.
-    // maxInactivity: 0          — no limit on idle sender connection time.
-    // Heartbeat messages (every 30s) also keep the Cast channel alive.
+    // idleTimeoutMs: 86400000 — 24h idle timeout (default 5min kills IDLE receiver
+    //   when we return null from LOAD interceptor to bypass CAF for live streams).
+    // maxInactivity: 3600     — 1h grace period if phone briefly disconnects.
+    // Heartbeat pings every 30s keep the Cast channel active as belt-and-suspenders.
     context.addCustomMessageListener(HEARTBEAT_NS, () => {
-      // Sender responded — session is alive
+      // Phone responded — session is alive
     });
-    context.start({ disableIdleTimeout: true, idleTimeoutMs: 86400000, maxInactivity: 3600 });
+    context.start({ idleTimeoutMs: 86400000, maxInactivity: 3600 });
     log('✅ SimpleTv Receiver ready  (35D1A927)');
     console.log('[SimpleTv] Receiver started — App ID 35D1A927');
   </script>
