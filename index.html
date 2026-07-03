@@ -314,12 +314,15 @@
       }, delayMs);
     }
 
-    /* ── MPEG-TS live streams ─────────────────────────────────────────
-       Always use mpegts.js. All .ts live streams are routed through the
-       CF proxy by CastService (HTTPS + Access-Control-Allow-Origin:*),
-       so mpegts.js fetch() has no CORS issue. mpegts.js also correctly
-       handles the chunked Transfer-Encoding the proxy uses — <video src>
-       would stall waiting for a Content-Length that never arrives.      */
+    /* ── MPEG-TS live streams — native <video src> ────────────────────
+       Why NOT mpegts.js: its internal fetch() is a cross-origin
+       JavaScript request. IPTV servers return no CORS headers, so the
+       browser silently blocks the response → permanent buffering.
+       <video src> is passive media — CORS is NOT enforced — and the
+       browser follows CDN 302 redirects natively, tying the session
+       token to the Chromecast's own IP automatically.
+       The 5-minute crash was purely the dual refresh timer race — now
+       fixed via idleTimeoutMs + removed scheduleLiveRefresh calls.    */
     function playMpegTs(url, originalLiveUrl = '') {
       destroyPlayer();
       currentLiveOriginalUrl = originalLiveUrl || currentLiveOriginalUrl || '';
@@ -327,40 +330,9 @@
       overlay.classList.add('hidden');
       hideSwitching();
 
-      if (typeof mpegts !== 'undefined' && mpegts.isSupported()) {
-        log('▶️ mpegts.js: ' + url.substring(0, 70));
-        const p = mpegts.createPlayer({
-          type: 'mpegts',
-          isLive: true,
-          url: url,
-        }, {
-          enableWorker: true,
-          enableStashBuffer: true,
-          liveBufferLatencyChasing: false,
-          lazyLoad: false,
-          autoCleanupSourceBuffer: true,
-          autoCleanupMinBackwardDuration: 30,
-          autoCleanupMaxBackwardDuration: 60,
-        });
-        p.attachMediaElement(video);
-        p.load();
-        p.on(mpegts.Events.ERROR, (errType, errDetail) => {
-          log('❌ mpegts error: ' + errType + ' / ' + errDetail);
-          if (errType === mpegts.ErrorTypes.NETWORK_ERROR || errType === mpegts.ErrorTypes.IO_ERROR) {
-            setBuffering(true);
-            scheduleReconnect(3000, 'Network error');
-          } else {
-            setBuffering(false);
-          }
-        });
-        activePlayer = p;
-        video.play().catch(e => log('play() rejected: ' + e.message));
-      } else {
-        // Fallback: mpegts.js unavailable — try native video element
-        log('⚠️ mpegts.js unavailable — native video fallback: ' + url.substring(0, 60));
-        video.src = url;
-        video.play().catch(e => log('play() rejected: ' + e.message));
-      }
+      log('▶️ live stream: ' + url.substring(0, 70));
+      video.src = url;
+      video.play().catch(e => log('play() rejected: ' + e.message));
 
       // Startup watchdog: if playback hasn't started in 25s, force reconnect
       startupWatchdogTimer = setTimeout(() => {
@@ -431,33 +403,9 @@
       // Reset reconnect counter for new channel
       reconnectCount = 0;
 
-        // For proxy URLs (/api/stream?url=...), decode the underlying URL to check
-        // its extension. mp4/mkv/avi/webm proxy URLs must go to CAF, not mpegts.js.
-        let isLiveProxy = false;
-        if (rawUrl.includes('/api/stream')) {
-          try {
-            const proxiedUrl = new URL(rawUrl).searchParams.get('url') || '';
-            isLiveProxy = !/\.(mp4|mkv|avi|webm)($|\?)/i.test(proxiedUrl);
-          } catch(e) {
-            isLiveProxy = true; // Can't parse — assume live
-          }
-        }
-        if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || isLiveProxy) {
-          log('📡 MPEG-TS stream → mpegts.js');
-          // For bare .ts URLs: resolve the redirect from Chromecast's own residential IP.
-          // The CDN token is then tied to Chromecast's IP, not a datacenter IP, so the
-          // stream stays alive indefinitely (no ~5s IP-mismatch drop from CF proxy).
-          // isLiveProxy URLs are already CF proxy URLs — play them directly as before.
-          if (/\.ts($|\?)/i.test(rawUrl) && !isLiveProxy) {
-            // Pass the original URL directly to mpegts.js — it uses fetch(redirect:'follow')
-            // internally, so any CDN redirect is followed from the Chromecast's own IP.
-            // The CDN token is therefore tied to Chromecast's IP automatically.
-            // A separate resolveRedirect probe is unnecessary and causes double-connection
-            // failures on IPTV servers with per-user connection limits.
-            playMpegTs(rawUrl, rawUrl);
-          } else {
-            playMpegTs(rawUrl, originalLiveUrl);
-          }
+        if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t') {
+          log('📡 MPEG-TS live stream → video.src');
+          playMpegTs(rawUrl, rawUrl);
           return null; // We own playback — bypass CAF
         }
 
