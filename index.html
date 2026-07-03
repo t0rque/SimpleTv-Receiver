@@ -314,15 +314,13 @@
       }, delayMs);
     }
 
-    /* ── MPEG-TS live streams — native <video src> ────────────────────
-       Why NOT mpegts.js: its internal fetch() is a cross-origin
-       JavaScript request. IPTV servers return no CORS headers, so the
-       browser silently blocks the response → permanent buffering.
-       <video src> is passive media — CORS is NOT enforced — and the
-       browser follows CDN 302 redirects natively, tying the session
-       token to the Chromecast's own IP automatically.
-       The 5-minute crash was purely the dual refresh timer race — now
-       fixed via idleTimeoutMs + removed scheduleLiveRefresh calls.    */
+    /* ── MPEG-TS live streams — mpegts.js via CF proxy ──────────────────
+       The phone resolves the CDN redirect from a residential IP, then wraps
+       the CDN URL in the CF proxy for HTTPS delivery. mpegts.js can fetch
+       the CF proxy URL (HTTPS + Access-Control-Allow-Origin:*) without any
+       CORS or mixed-content issue.
+       The 5-minute crash was purely the dual refresh timer race — now fixed
+       via idleTimeoutMs + removed scheduleLiveRefresh calls.              */
     function playMpegTs(url, originalLiveUrl = '') {
       destroyPlayer();
       currentLiveOriginalUrl = originalLiveUrl || currentLiveOriginalUrl || '';
@@ -330,8 +328,32 @@
       overlay.classList.add('hidden');
       hideSwitching();
 
-      log('▶️ live stream: ' + url.substring(0, 70));
-      video.src = url;
+      log('▶️ mpegts.js: ' + url.substring(0, 70));
+      const p = mpegts.createPlayer({
+        type: 'mpegts',
+        isLive: true,
+        url: url,
+      }, {
+        enableWorker: true,
+        enableStashBuffer: true,
+        liveBufferLatencyChasing: false,
+        lazyLoad: false,
+        autoCleanupSourceBuffer: true,
+        autoCleanupMinBackwardDuration: 30,
+        autoCleanupMaxBackwardDuration: 60,
+      });
+      p.attachMediaElement(video);
+      p.load();
+      p.on(mpegts.Events.ERROR, (errType, errDetail) => {
+        log('❌ mpegts error: ' + errType + ' / ' + errDetail);
+        if (errType === mpegts.ErrorTypes.NETWORK_ERROR || errType === mpegts.ErrorTypes.IO_ERROR) {
+          setBuffering(true);
+          scheduleReconnect(3000, 'Network error');
+        } else {
+          setBuffering(false);
+        }
+      });
+      activePlayer = p;
       video.play().catch(e => log('play() rejected: ' + e.message));
 
       // Startup watchdog: if playback hasn't started in 25s, force reconnect
