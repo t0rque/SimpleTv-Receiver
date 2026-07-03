@@ -392,14 +392,15 @@
       video.play().catch(e => log('play() rejected: ' + e.message));
 
       // Some streams hang in buffering after player recreate without firing ERROR.
-      // If playback hasn't started in 12s, force a fresh reconnect with cache-bust.
+      // 25s gives slow IPTV providers enough time to start delivering data before
+      // we attempt a reconnect (12s was too aggressive and caused infinite loops).
       startupWatchdogTimer = setTimeout(() => {
         startupWatchdogTimer = null;
         const started = !video.paused && video.readyState >= 2;
         if (started) return;
         log('⏱️ Startup watchdog timeout — forcing reconnect');
         scheduleReconnect(1000, 'Startup stall');
-      }, 12000);
+      }, 25000);
 
       startHeartbeat();
 
@@ -481,7 +482,10 @@
           // stream stays alive indefinitely (no ~5s IP-mismatch drop from CF proxy).
           // isLiveProxy URLs are already CF proxy URLs — play them directly as before.
           if (/\.ts($|\?)/i.test(rawUrl) && !isLiveProxy) {
-            resolveRedirect(withCacheBust(rawUrl)).then(resolvedUrl => {
+            // Use rawUrl as-is for redirect resolution — withCacheBust on the initial URL
+            // can break CDN token auth and cause double-connection issues on servers with
+            // per-user connection limits. Cache-bust is only needed on REFRESH calls.
+            resolveRedirect(rawUrl).then(resolvedUrl => {
               playMpegTs(resolvedUrl, rawUrl);
             }).catch(() => {
               playMpegTs(rawUrl, rawUrl); // fallback to direct on fetch error
