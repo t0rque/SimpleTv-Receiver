@@ -155,6 +155,33 @@
     let currentLiveMode = null;
     const LIVE_REFRESH_MS = 4 * 60 * 1000;
 
+    // ── Heartbeat — keeps Cast session alive when PlayerManager is IDLE ──
+    // Returning null from LOAD leaves CAF in IDLE state. Without activity,
+    // the Cast framework kills the receiver after ~5 min. We send a ping
+    // every 30s so the session channel stays active from both sides.
+    const HEARTBEAT_NS = 'urn:x-cast:com.supremeiptv.heartbeat';
+    let heartbeatInterval = null;
+
+    function startHeartbeat() {
+      stopHeartbeat();
+      heartbeatInterval = setInterval(() => {
+        try {
+          context.sendCustomMessage(HEARTBEAT_NS, undefined, { type: 'ping', ts: Date.now() });
+          log('💓 Heartbeat ping sent');
+        } catch(e) {
+          // Non-fatal — session may be ending
+        }
+      }, 30000);
+      log('💓 Heartbeat started (30s interval)');
+    }
+
+    function stopHeartbeat() {
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
+    }
+
     /* ── Logging ──────────────────────────────────────────────────── */
     function log(msg) {
       console.log('[SupremeIPTV] ' + msg);
@@ -244,6 +271,7 @@
         reconnectTimer = null;
       }
       clearLiveRefreshTimer();
+      stopHeartbeat();
       if (startupWatchdogTimer) {
         clearTimeout(startupWatchdogTimer);
         startupWatchdogTimer = null;
@@ -303,7 +331,7 @@
         log('⚠️ mpegts.js not supported — trying native video element');
         video.src = url;
         video.play().catch(e => log('native play error: ' + e.message));
-        scheduleLiveRefresh();
+        startHeartbeat();
         return;
       }
       log('▶️ mpegts.js: loading live stream…');
@@ -367,7 +395,7 @@
         scheduleReconnect(1000, 'Startup stall');
       }, 12000);
 
-      scheduleLiveRefresh();
+      startHeartbeat();
 
     }
 
@@ -380,7 +408,7 @@
         log('▶️ Using native HLS (Hls.js not supported)');
         video.src = url;
         video.play().catch(e => log('native play error: ' + e.message));
-        scheduleLiveRefresh();
+        startHeartbeat();
         return;
       }
       log('▶️ hls.js: loading HLS stream…');
@@ -405,7 +433,7 @@
         }
       });
       activePlayer = h;
-      scheduleLiveRefresh();
+      startHeartbeat();
     }
 
     /* ── Cast LOAD interceptor ────────────────────────────────────── */
@@ -529,11 +557,16 @@
     });
 
     /* ── Start ────────────────────────────────────────────────────── */
-    // idleTimeoutMs: 24h — prevents CAF killing the session when we own
-    // playback via mpegts.js (returning null from LOAD leaves PlayerManager
-    // IDLE; default 5min timeout kills the session otherwise).
-    // WARNING: do NOT use 0 — some Chromecast firmware treats 0 as "timeout immediately".
-    context.start({ maxInactivity: 3600, idleTimeoutMs: 86400000 });
+    // disableIdleTimeout: true  — definitive way to prevent CAF killing the session
+    //   when we own playback (returning null from LOAD leaves PlayerManager IDLE;
+    //   the default 5-min idleTimeoutMs fires even with explicit large values).
+    // idleTimeoutMs: 86400000   — belt-and-suspenders large value.
+    // maxInactivity: 0          — no limit on idle sender connection time.
+    // Heartbeat messages (every 30s) also keep the Cast channel alive.
+    context.addCustomMessageListener(HEARTBEAT_NS, () => {
+      // Sender responded — session is alive
+    });
+    context.start({ disableIdleTimeout: true, idleTimeoutMs: 86400000, maxInactivity: 0 });
     log('✅ SimpleTv Receiver ready  (35D1A927)');
     console.log('[SimpleTv] Receiver started — App ID 35D1A927');
   </script>
