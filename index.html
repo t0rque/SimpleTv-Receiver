@@ -481,6 +481,19 @@
       }
     );
 
+    // ── Override reported playerState when custom player is active ─────────
+    // When we return null from LOAD (for live streams), CAF's internal state
+    // stays IDLE. The sender phone receives MEDIA_STATUS with playerState=IDLE
+    // and kills the session after 5 minutes — regardless of idleTimeoutMs.
+    // Fix: report PLAYING state whenever mpegts.js or hls.js is active.
+    playerManager.setCustomizedStatusCallback((mediaStatus) => {
+      if (currentLiveMode === 'mpegts' || currentLiveMode === 'hls') {
+        mediaStatus.playerState = cast.framework.messages.PlayerState.PLAYING;
+        mediaStatus.currentTime = video.currentTime;
+      }
+      return mediaStatus;
+    });
+
     /* ── Video events ─────────────────────────────────────────────── */
     video.addEventListener('playing', () => {
       if (startupWatchdogTimer) {
