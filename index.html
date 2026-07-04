@@ -425,9 +425,19 @@
       // Reset reconnect counter for new channel
       reconnectCount = 0;
 
-        if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t') {
-          log('📡 MPEG-TS live stream → video.src');
-          playMpegTs(rawUrl, rawUrl);
+        // CF proxy URLs (/api/stream?url=...) are always live MPEG-TS regardless
+        // of extension — the CDN URL often has no extension (e.g. /live/play/TOKEN/20170).
+        // Must detect these via the path, not just the .ts extension.
+        let isLiveProxy = false;
+        if (rawUrl.includes('/api/stream')) {
+          try {
+            const proxiedUrl = new URL(rawUrl).searchParams.get('url') || '';
+            isLiveProxy = !/\.(mp4|mkv|avi|webm)($|\?)/i.test(proxiedUrl);
+          } catch(e) { isLiveProxy = true; }
+        }
+        if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || isLiveProxy) {
+          log('📡 MPEG-TS live stream → mpegts.js');
+          playMpegTs(rawUrl, originalLiveUrl || rawUrl);
           return null; // We own playback — bypass CAF
         }
 
