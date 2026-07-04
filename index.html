@@ -149,7 +149,7 @@
     const nowPlaying     = document.getElementById('now-playing');
 
     // Debug mode: add #debug to the receiver URL to show the log bar
-    const DEBUG_MODE = location.hash.includes('debug');
+    const DEBUG_MODE = true; // temporary: always-on for crash diagnosis
     if (DEBUG_MODE) statusBar.classList.add('visible');
 
     // Session timer — always visible, bottom-left corner.
