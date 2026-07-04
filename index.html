@@ -39,16 +39,9 @@
     #overlay .logo { width: 160px; height: 160px; margin-bottom: 28px; border-radius: 28px; }
     #overlay h1 { font-size: 52px; font-weight: 700; letter-spacing: 2px; color: #00d4ff; text-shadow: 0 0 24px rgba(0,212,255,0.5); }
     #overlay p { font-size: 22px; opacity: 0.6; margin-top: 12px; color: #a0c8e0; letter-spacing: 1px; }
-    /* ── Session timer (always visible — bottom-left) ────────────── */
-    #session-timer {
-      position: absolute; bottom: 24px; left: 24px;
-      background: rgba(0,0,0,0.7); color: #aaa; font-size: 13px;
-      font-family: monospace; padding: 5px 10px; border-radius: 6px;
-      pointer-events: none;
-    }
     /* ── Debug log bar (only shown in #debug mode) ──────────────── */
     #status-bar {
-      position: absolute; bottom: 52px; left: 24px;
+      position: absolute; bottom: 24px; left: 24px;
       background: rgba(0,0,0,0.85); color: #0f0; font-size: 15px;
       font-family: monospace; padding: 8px 14px; border-radius: 8px;
       max-width: 90%; word-break: break-all;
@@ -132,9 +125,6 @@
   <!-- Now playing toast (bottom centre, fades out) -->
   <div id="now-playing" id="now-playing-text"></div>
 
-  <!-- Session timer (always visible — helps diagnose 5-min crash timing) -->
-  <div id="session-timer">00:00</div>
-
   <!-- Debug log bar (only visible in #debug mode) -->
   <div id="status-bar"></div>
 
@@ -151,18 +141,6 @@
     // Debug mode: add #debug to the receiver URL to show the log bar
     const DEBUG_MODE = location.hash.includes('debug');
     if (DEBUG_MODE) statusBar.classList.add('visible');
-
-    // Session timer — always visible, bottom-left corner.
-    // Shows elapsed time since receiver loaded. Used to diagnose 5-min crash:
-    // if crash is at exactly 5:00 → CAF idle timeout; other time → different cause.
-    const sessionTimerEl = document.getElementById('session-timer');
-    const sessionStart = Date.now();
-    setInterval(() => {
-      const s = Math.floor((Date.now() - sessionStart) / 1000);
-      const m = Math.floor(s / 60).toString().padStart(2, '0');
-      const sec = (s % 60).toString().padStart(2, '0');
-      sessionTimerEl.textContent = m + ':' + sec;
-    }, 1000);
 
     let activePlayer     = null;
     let statusHideTimer  = null;
