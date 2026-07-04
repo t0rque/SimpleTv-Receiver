@@ -149,7 +149,7 @@
     const nowPlaying     = document.getElementById('now-playing');
 
     // Debug mode: add #debug to the receiver URL to show the log bar
-    const DEBUG_MODE = true; // temporary: always-on for crash diagnosis
+    const DEBUG_MODE = location.hash.includes('debug');
     if (DEBUG_MODE) statusBar.classList.add('visible');
 
     // Session timer — always visible, bottom-left corner.
@@ -480,28 +480,6 @@
         return loadRequestData;
       }
     );
-
-    // ── Override reported playerState when custom player is active ─────────
-    // When we return null from LOAD (for live streams), CAF's internal state
-    // stays IDLE. The sender phone receives MEDIA_STATUS with playerState=IDLE
-    // and kills the session after 5 minutes — regardless of idleTimeoutMs.
-    // Fix: intercept outgoing MEDIA_STATUS messages and report PLAYING state
-    // whenever mpegts.js or hls.js is active, so the sender never sees IDLE.
-    try {
-      playerManager.setMessageInterceptor(
-        cast.framework.messages.MessageType.MEDIA_STATUS,
-        (mediaStatus) => {
-          if (currentLiveMode && mediaStatus) {
-            mediaStatus.playerState = cast.framework.messages.PlayerState.PLAYING;
-            if (video) mediaStatus.currentTime = video.currentTime;
-          }
-          return mediaStatus;
-        }
-      );
-      log('✅ Status override active');
-    } catch(e) {
-      log('⚠️ Status override unavailable: ' + e.message);
-    }
 
     /* ── Video events ─────────────────────────────────────────────── */
     video.addEventListener('playing', () => {
