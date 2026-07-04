@@ -568,15 +568,17 @@
     });
 
     /* ── Start ────────────────────────────────────────────────────── */
-    // idleTimeoutMs: 0 — DISABLE idle timeout entirely.
-    //   Default is 300000ms (5 min). When we return null from the LOAD interceptor
-    //   to bypass CAF for live streams, CAF stays in IDLE state and kills the session
-    //   after 5 minutes. Setting to 0 disables this completely.
+    // disableIdleTimeout: true — the CORRECT way to prevent CAF from killing the
+    //   session when IDLE. When we return null from the LOAD interceptor for live
+    //   streams, CAF stays in IDLE state. The default behaviour is to close the
+    //   receiver after 300000ms (5 min) of IDLE — exactly matching the crash.
+    //   NOTE: idleTimeoutMs is NOT a real CastReceiverOptions property — docs only
+    //   list disableIdleTimeout for this purpose.
     // maxInactivity: 600 — 10 min before closing if phone disconnects (default 10s).
     context.addCustomMessageListener(HEARTBEAT_NS, () => {
       // Phone ping received — session is alive
     });
-    context.start({ idleTimeoutMs: 0, maxInactivity: 600 });
+    context.start({ disableIdleTimeout: true, maxInactivity: 600 });
     log('✅ SimpleTv Receiver ready  (35D1A927)');
     console.log('[SimpleTv] Receiver started — App ID 35D1A927');
   </script>
