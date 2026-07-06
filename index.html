@@ -326,7 +326,9 @@
       currentLiveOriginalUrl = originalLiveUrl || currentLiveOriginalUrl || '';
       currentLiveMode = 'mpegts';
       overlay.classList.add('hidden');
-      hideSwitching();
+      // Do NOT call hideSwitching() here — keep the spinner visible until the
+      // 'playing' event fires. On low-end Chromecasts the buffer-fill takes
+      // several seconds; hiding the spinner early shows a blank black screen.
 
       log('▶️ mpegts.js: ' + url.substring(0, 70));
       const p = mpegts.createPlayer({
@@ -339,8 +341,8 @@
         liveBufferLatencyChasing: false,
         lazyLoad: false,
         autoCleanupSourceBuffer: true,
-        autoCleanupMinBackwardDuration: 30,
-        autoCleanupMaxBackwardDuration: 60,
+        autoCleanupMinBackwardDuration: 8,   // was 30 — less MSE memory on low-end
+        autoCleanupMaxBackwardDuration: 15,  // was 60 — ~7MB vs ~30MB for 1080p
       });
       p.attachMediaElement(video);
       p.load();
@@ -356,14 +358,15 @@
       activePlayer = p;
       video.play().catch(e => log('play() rejected: ' + e.message));
 
-      // Startup watchdog: if playback hasn't started in 25s, force reconnect
+      // Startup watchdog: if playback hasn't started in 10s, force reconnect.
+      // 10s is enough for any healthy stream; faster recovery on first-load stalls.
       startupWatchdogTimer = setTimeout(() => {
         startupWatchdogTimer = null;
         const started = !video.paused && video.readyState >= 2;
         if (started) return;
         log('⏱️ Startup watchdog timeout — forcing reconnect');
         scheduleReconnect(1000, 'Startup stall');
-      }, 25000);
+      }, 10000);
       startHeartbeat();
     }
 
