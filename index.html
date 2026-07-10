@@ -446,8 +446,11 @@
 
         // ── HLS (.m3u8 or application/*mpegurl) ───────────────────
         if (/\.m3u8($|\?)/i.test(rawUrl) || ct.includes('mpegurl')) {
-          playHls(rawUrl, originalLiveUrl || rawUrl);
-          return null; // We own playback — bypass CAF
+          currentLiveOriginalUrl = '';
+          currentLiveMode = null;
+          destroyPlayer();
+          log('📺 Delegating HLS to CAF player');
+          return loadRequestData;
         }
 
         // ── Anything else (HTTP/HTTPS mp4, mkv, avi, webm) — delegate to CAF ──────
