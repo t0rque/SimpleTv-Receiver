@@ -165,21 +165,7 @@
     // the Cast framework kills the receiver after ~5 min. We send a ping
     // every 30s so the session channel stays active from both sides.
     const HEARTBEAT_NS = 'urn:x-cast:com.supremeiptv.heartbeat';
-    const STATUS_NS = 'urn:x-cast:com.supremeiptv.status';
     let heartbeatInterval = null;
-
-    function sendPlaybackStatus(state, detail = '') {
-      try {
-        context.sendCustomMessage(STATUS_NS, undefined, {
-          state,
-          detail,
-          mode: currentLiveMode || 'caf',
-          ts: Date.now(),
-        });
-      } catch(e) {
-        // Sender may not listen for status messages.
-      }
-    }
 
     function startHeartbeat() {
       stopHeartbeat();
@@ -250,6 +236,11 @@
 
     /* ── HEVC / unsupported codec error ─────────────────────────── */
     function showCodecError(channelName, codecLabel) {
+      // Cancel watchdog + block reconnects — unsupported codec won't recover by retrying
+      if (startupWatchdogTimer) { clearTimeout(startupWatchdogTimer); startupWatchdogTimer = null; }
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      reconnectCount = MAX_RECONNECTS;
+      setTimeout(destroyPlayer, 0); // defer so we don't destroy player inside its own event
       hideSwitching();
       switchChName.textContent = channelName || currentChannel;
       switchChSub.textContent = codecLabel + ' video is not supported on this device (audio only)';
@@ -469,7 +460,6 @@
         const loadLabel = channelName ? ('📥 Loading: ' + channelName) : ('📥 LOAD: ' + rawUrl.substring(0, 80));
         log(loadLabel);
         console.log('[SupremeIPTV] LOAD  url=' + rawUrl + '  ct=' + ct + '  channel=' + channelName);
-        sendPlaybackStatus('loading');
 
       // Reset reconnect counter for new channel
       reconnectCount = 0;
@@ -492,11 +482,8 @@
 
         // ── HLS (.m3u8 or application/*mpegurl) ───────────────────
         if (/\.m3u8($|\?)/i.test(rawUrl) || ct.includes('mpegurl')) {
-          currentLiveOriginalUrl = '';
-          currentLiveMode = null;
-          destroyPlayer();
-          log('📺 Delegating HLS to CAF player');
-          return loadRequestData;
+          playHls(rawUrl, originalLiveUrl || rawUrl);
+          return null; // We own playback — bypass CAF
         }
 
         // ── Anything else (HTTP/HTTPS mp4, mkv, avi, webm) — delegate to CAF ──────
@@ -527,12 +514,10 @@
       setBuffering(false);
       showNowPlaying(currentChannel);
       logThenHide('✅ Playing', 3000);
-      sendPlaybackStatus('playing');
     });
     video.addEventListener('waiting', () => {
       setBuffering(true);
       log('⏳ Buffering…');
-      sendPlaybackStatus('buffering');
     });
     video.addEventListener('stalled', () => {
       setBuffering(true);
@@ -552,7 +537,6 @@
       setBuffering(false);
       const msg = video.error ? video.error.message : 'unknown error';
       log('❌ Video error: ' + msg);
-      sendPlaybackStatus('error', msg);
 
       // Live stream error handling:
       //   mpegts.js active (activePlayer set) → let mpegts.js handle via Events.ERROR
@@ -588,9 +572,6 @@
     // maxInactivity: 600 — 10 min before closing if phone disconnects (default 10s).
     context.addCustomMessageListener(HEARTBEAT_NS, () => {
       // Phone ping received — session is alive
-    });
-    context.addCustomMessageListener(STATUS_NS, () => {
-      // Status is receiver-to-sender; listener registration advertises the namespace.
     });
     context.start({ disableIdleTimeout: true, maxInactivity: 600 });
     log('✅ SimpleTv Receiver ready  (35D1A927)');
