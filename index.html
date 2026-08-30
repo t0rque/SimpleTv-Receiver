@@ -76,6 +76,10 @@
     #switch-overlay .ch-sub {
       font-size: 18px; color: #a0c8e0; margin-top: 10px; opacity: 0.75;
     }
+    #switch-overlay .ch-sub.error { color: #ff9900; opacity: 1; }
+    #switch-overlay.error-mode .spinner { display: none; }
+    #switch-overlay .error-icon { font-size: 52px; margin-bottom: 16px; display: none; }
+    #switch-overlay.error-mode .error-icon { display: block; }
 
     /* ── Buffering badge ─────────────────────────────────────────── */
     #buffering-badge {
@@ -114,6 +118,7 @@
 
   <!-- Channel switching overlay (spinner + name) -->
   <div id="switch-overlay">
+    <div class="error-icon">⚠️</div>
     <div class="spinner"></div>
     <div class="ch-name" id="switch-ch-name">Loading…</div>
     <div class="ch-sub" id="switch-ch-sub">Switching channel</div>
@@ -217,6 +222,8 @@
       currentChannel = channelName || 'Loading…';
       switchChName.textContent = currentChannel;
       switchChSub.textContent = 'Switching channel';
+      switchChSub.classList.remove('error');
+      switchOverlay.classList.remove('error-mode');
       switchOverlay.classList.add('visible');
       clearTimeout(switchTimer);
       // Safety: auto-hide after 12s in case playback events don't fire
@@ -239,6 +246,17 @@
     function setBuffering(on) {
       if (on) bufferingBadge.classList.add('visible');
       else    bufferingBadge.classList.remove('visible');
+    }
+
+    /* ── HEVC / unsupported codec error ─────────────────────────── */
+    function showCodecError(channelName, codecLabel) {
+      hideSwitching();
+      switchChName.textContent = channelName || currentChannel;
+      switchChSub.textContent = codecLabel + ' video is not supported on this device (audio only)';
+      switchChSub.classList.add('error');
+      switchOverlay.classList.add('visible', 'error-mode');
+      clearTimeout(switchTimer);
+      log('⚠️ Codec error shown: ' + codecLabel);
     }
 
     function clearLiveRefreshTimer() {
@@ -369,6 +387,13 @@
           setBuffering(false);
         }
       });
+      p.on(mpegts.Events.MEDIA_INFO, (info) => {
+        const vc = (info && info.videoCodec) || '';
+        log('🎞️ Media info — video: ' + (vc || 'none') + ' audio: ' + ((info && info.audioCodec) || 'none'));
+        if (/hvc1|hev1|hevc/i.test(vc)) {
+          showCodecError(currentChannel, 'H.265/HEVC');
+        }
+      });
       activePlayer = p;
       video.play().catch(e => log('play() rejected: ' + e.message));
 
@@ -406,8 +431,14 @@
       });
       h.loadSource(url);
       h.attachMedia(video);
-      h.on(Hls.Events.MANIFEST_PARSED, () => {
+      h.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
         log('✅ HLS manifest ready');
+        const levels = (data && data.levels) || [];
+        const allHevc = levels.length > 0 && levels.every(l => /hvc1|hev1|hevc/i.test((l.videoCodec || '') + (l.attrs && l.attrs.CODECS || '')));
+        if (allHevc) {
+          showCodecError(currentChannel, 'H.265/HEVC');
+          return;
+        }
         video.play().catch(e => log('play() rejected: ' + e.message));
       });
       h.on(Hls.Events.ERROR, (_, data) => {
