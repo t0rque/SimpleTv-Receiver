@@ -128,7 +128,7 @@
   <div id="buffering-badge">⏳ Buffering…</div>
 
   <!-- Now playing toast (bottom centre, fades out) -->
-  <div id="now-playing" id="now-playing-text"></div>
+  <div id="now-playing"></div>
 
   <!-- Debug log bar (only visible in #debug mode) -->
   <div id="status-bar"></div>
@@ -153,6 +153,13 @@
     let nowPlayingTimer  = null;
     let reconnectTimer   = null;  // module-level — cleared in destroyPlayer()
     let startupWatchdogTimer = null; // catches silent startup stalls after recycle
+    let playbackWatchdogTimer = null;
+    let cleanupTimer = null;
+    let playerGeneration = 0;
+    let terminalPlaybackError = false;
+    let expectsVideo = true;
+    const STARTUP_TIMEOUT_MS = 25000;
+    const STALL_TIMEOUT_MS = 20000;
     let reconnectCount   = 0;    // reset on each new channel load
     let currentChannel   = '';
     let liveRefreshTimer = null;
@@ -212,8 +219,7 @@
       switchOverlay.classList.remove('error-mode');
       switchOverlay.classList.add('visible');
       clearTimeout(switchTimer);
-      // Safety: auto-hide after 12s in case playback events don't fire
-      switchTimer = setTimeout(() => hideSwitching(), 12000);
+      // Playback progress or an explicit error dismisses this, never a blind timer.
     }
     function hideSwitching() {
       clearTimeout(switchTimer);
@@ -234,20 +240,85 @@
       else    bufferingBadge.classList.remove('visible');
     }
 
-    /* ── HEVC / unsupported codec error ─────────────────────────── */
-    function showCodecError(channelName, codecLabel) {
-      // Cancel watchdog + block reconnects — unsupported codec won't recover by retrying
+    /* ── Terminal errors must not leak into the next channel ────── */
+    function showPlaybackError(message) {
+      if (terminalPlaybackError) return;
+      terminalPlaybackError = true;
       if (startupWatchdogTimer) { clearTimeout(startupWatchdogTimer); startupWatchdogTimer = null; }
+      if (playbackWatchdogTimer) { clearInterval(playbackWatchdogTimer); playbackWatchdogTimer = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      clearLiveRefreshTimer();
       reconnectCount = MAX_RECONNECTS;
-      setTimeout(destroyPlayer, 0); // defer so we don't destroy player inside its own event
+      // Defer destruction out of player callbacks, but only for THIS player.
+      const generation = playerGeneration;
+      cleanupTimer = setTimeout(() => {
+        cleanupTimer = null;
+        if (generation === playerGeneration && terminalPlaybackError) destroyPlayer();
+      }, 0);
+      setBuffering(false);
+      overlay.classList.add('hidden');
       hideSwitching();
-      switchChName.textContent = channelName || currentChannel;
-      switchChSub.textContent = codecLabel + ' video is not supported on this device (audio only)';
+      nowPlaying.classList.remove('visible');
+      switchChName.textContent = currentChannel;
+      switchChSub.textContent = message;
       switchChSub.classList.add('error');
       switchOverlay.classList.add('visible', 'error-mode');
-      clearTimeout(switchTimer);
-      log('⚠️ Codec error shown: ' + codecLabel);
+      log('⚠️ ' + message);
+    }
+
+    function videoCodecSupported(codec, width, height) {
+      // Missing/ambiguous codec metadata is not proof of incompatibility.
+      if (!codec || !/^(avc[13]|hvc1|hev1|vp09|av01)\./i.test(codec)) return true;
+      try {
+        // mpegts.js transmuxes TS into MP4 before appending to MSE.
+        if (typeof MediaSource !== 'undefined' &&
+            !MediaSource.isTypeSupported('video/mp4; codecs="' + codec + '"')) return false;
+        return context.canDisplayType('video/mp4', codec, width || undefined, height || undefined);
+      } catch (e) {
+        return true; // Let actual playback decide if the capability API is unavailable.
+      }
+    }
+
+    function markPlaybackHealthy() {
+      if (terminalPlaybackError) return;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      overlay.classList.add('hidden');
+      hideSwitching();
+      setBuffering(false);
+    }
+
+    function startPlaybackWatchdog() {
+      const generation = playerGeneration;
+      const startedAt = Date.now();
+      let lastProgressAt = startedAt;
+      let lastTime = video.currentTime;
+      let healthySince = null;
+      let hasStarted = false;
+      playbackWatchdogTimer = setInterval(() => {
+        if (generation !== playerGeneration || terminalPlaybackError) return;
+        const now = Date.now();
+        const advancing = !video.paused && video.readyState >= 2 && video.currentTime > lastTime + 0.05;
+        lastTime = video.currentTime;
+        const hasPicture = !expectsVideo || (video.videoWidth > 0 && video.videoHeight > 0);
+        if (advancing && hasPicture) {
+          if (!hasStarted) showNowPlaying(currentChannel);
+          hasStarted = true;
+          lastProgressAt = now;
+          markPlaybackHealthy();
+          if (healthySince === null) healthySince = now;
+          // A brief 'playing' event must not reset an endless failure loop.
+          if (now - healthySince >= 10000) reconnectCount = 0;
+          return;
+        }
+        healthySince = null;
+        if (advancing && !hasPicture && now - startedAt >= STARTUP_TIMEOUT_MS) {
+          showPlaybackError('Audio is arriving, but no video can be displayed. Try another channel version (H.264/AVC).');
+        } else if (!hasStarted && now - startedAt >= STARTUP_TIMEOUT_MS) {
+          scheduleReconnect(1000, 'Startup timeout');
+        } else if (hasStarted && !video.paused && now - lastProgressAt >= STALL_TIMEOUT_MS) {
+          scheduleReconnect(1000, 'Playback stalled');
+        }
+      }, 1000);
     }
 
     function clearLiveRefreshTimer() {
@@ -259,6 +330,7 @@
 
     async function refreshLiveStream(reason) {
       clearLiveRefreshTimer();
+      if (terminalPlaybackError) return;
       if (!currentLiveOriginalUrl || !currentLiveMode) {
         log('ℹ️ Live refresh skipped — no original live URL available');
         return;
@@ -288,6 +360,9 @@
 
     /* ── Player cleanup ───────────────────────────────────────────── */
     function destroyPlayer() {
+      playerGeneration++;
+      if (cleanupTimer) { clearTimeout(cleanupTimer); cleanupTimer = null; }
+      if (playbackWatchdogTimer) { clearInterval(playbackWatchdogTimer); playbackWatchdogTimer = null; }
       // Cancel any pending reconnect — prevents zombie timers destroying the next channel's player
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
@@ -299,21 +374,23 @@
         clearTimeout(startupWatchdogTimer);
         startupWatchdogTimer = null;
       }
-      if (!activePlayer) return;
-      try { activePlayer.destroy(); } catch(e) {}
+      const previousPlayer = activePlayer;
       activePlayer = null;
-      video.src = '';
+      try { if (previousPlayer) previousPlayer.destroy(); } catch(e) {}
+      video.pause();
+      video.removeAttribute('src');
       video.load();
     }
 
     function withCacheBust(url) {
       try {
         const u = new URL(url);
+        // Never modify a signed CDN/HLS URL. Only bust the outer proxy request.
+        if (u.pathname !== '/api/stream') return url;
         u.searchParams.set('_cb', Date.now().toString());
         return u.toString();
       } catch (e) {
-        const sep = url.includes('?') ? '&' : '?';
-        return url + sep + '_cb=' + Date.now();
+        return url;
       }
     }
 
@@ -322,13 +399,13 @@
        video element error handler can call it.                       */
     const MAX_RECONNECTS = 5;
     function scheduleReconnect(delayMs, reason) {
+      if (terminalPlaybackError || !currentLiveMode) return;
       if (reconnectTimer) return; // already scheduled
       if (reconnectCount >= MAX_RECONNECTS) {
-        log('❌ Max reconnects reached — giving up');
-        hideSwitching();
-        setBuffering(false);
+        showPlaybackError('Unable to play this stream after several attempts. Select the channel again to request a fresh stream.');
         return;
       }
+      setBuffering(true);
       reconnectCount++;
       log('🔄 ' + reason + ' — reconnecting in ' + (delayMs / 1000).toFixed(0) + 's… (attempt ' + reconnectCount + '/' + MAX_RECONNECTS + ')');
       reconnectTimer = setTimeout(() => {
@@ -367,37 +444,33 @@
         autoCleanupMinBackwardDuration: 8,   // was 30 — less MSE memory on low-end
         autoCleanupMaxBackwardDuration: 15,  // was 60 — ~7MB vs ~30MB for 1080p
       });
-      p.attachMediaElement(video);
-      p.load();
+      activePlayer = p;
       p.on(mpegts.Events.ERROR, (errType, errDetail) => {
+        if (activePlayer !== p || terminalPlaybackError) return;
         log('❌ mpegts error: ' + errType + ' / ' + errDetail);
-        if (errType === mpegts.ErrorTypes.NETWORK_ERROR || errType === mpegts.ErrorTypes.IO_ERROR) {
-          setBuffering(true);
-          scheduleReconnect(3000, 'Network error');
+        if (errDetail === mpegts.ErrorDetails.MEDIA_CODEC_UNSUPPORTED) {
+          showPlaybackError('This stream uses a codec that this Cast device cannot play. Try an H.264/AAC channel version.');
         } else {
-          setBuffering(false);
+          scheduleReconnect(3000, 'Stream error');
         }
       });
       p.on(mpegts.Events.MEDIA_INFO, (info) => {
+        if (activePlayer !== p || terminalPlaybackError) return;
         const vc = (info && info.videoCodec) || '';
         log('🎞️ Media info — video: ' + (vc || 'none') + ' audio: ' + ((info && info.audioCodec) || 'none'));
-        if (/hvc1|hev1|hevc/i.test(vc)) {
-          showCodecError(currentChannel, 'H.265/HEVC');
+        if (!videoCodecSupported(vc, info && info.width, info && info.height)) {
+          showPlaybackError('Video codec ' + vc + ' is not supported on this Cast device. Try an H.264/AVC channel version.');
         }
       });
-      activePlayer = p;
-      video.play().catch(e => log('play() rejected: ' + e.message));
-
-      // Startup watchdog: if playback hasn't started in 10s, force reconnect.
-      // 10s is enough for any healthy stream; faster recovery on first-load stalls.
-      startupWatchdogTimer = setTimeout(() => {
-        startupWatchdogTimer = null;
-        const started = !video.paused && video.readyState >= 2;
-        if (started) return;
-        log('⏱️ Startup watchdog timeout — forcing reconnect');
-        scheduleReconnect(1000, 'Startup stall');
-      }, 10000);
+      startPlaybackWatchdog();
       startHeartbeat();
+      try {
+        p.attachMediaElement(video);
+        p.load();
+        if (!terminalPlaybackError) video.play().catch(e => log('play() rejected: ' + e.message));
+      } catch (e) {
+        scheduleReconnect(3000, 'Player initialization failed');
+      }
     }
 
     /* ── hls.js — HLS .m3u8 streams ──────────────────────────────── */
@@ -405,11 +478,13 @@
       destroyPlayer();
       currentLiveOriginalUrl = originalLiveUrl || currentLiveOriginalUrl || '';
       currentLiveMode = 'hls';
+      overlay.classList.add('hidden');
+      startPlaybackWatchdog();
+      startHeartbeat();
       if (!Hls.isSupported()) {
         log('▶️ Using native HLS (Hls.js not supported)');
         video.src = url;
         video.play().catch(e => log('native play error: ' + e.message));
-        startHeartbeat();
         return;
       }
       log('▶️ hls.js: loading HLS stream…');
@@ -420,27 +495,37 @@
         manifestLoadingTimeOut: 10000,
         manifestLoadingMaxRetry: 3,
       });
-      h.loadSource(url);
-      h.attachMedia(video);
+      activePlayer = h;
       h.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+        if (activePlayer !== h || terminalPlaybackError) return;
         log('✅ HLS manifest ready');
         const levels = (data && data.levels) || [];
-        const allHevc = levels.length > 0 && levels.every(l => /hvc1|hev1|hevc/i.test((l.videoCodec || '') + (l.attrs && l.attrs.CODECS || '')));
-        if (allHevc) {
-          showCodecError(currentChannel, 'H.265/HEVC');
+        const supportedLevels = levels.map((l, i) => ({ level: l, index: i }))
+          .filter(({ level: l }) => videoCodecSupported(l.videoCodec, l.width, l.height));
+        if (levels.length && !supportedLevels.length) {
+          showPlaybackError('No supported video rendition is available on this Cast device. Try an H.264/AVC channel version.');
           return;
+        }
+        // Do not start or adapt to a rendition known to be unsupported.
+        if (supportedLevels.length && supportedLevels.length !== levels.length) {
+          h.currentLevel = supportedLevels[0].index;
         }
         video.play().catch(e => log('play() rejected: ' + e.message));
       });
       h.on(Hls.Events.ERROR, (_, data) => {
+        if (activePlayer !== h || terminalPlaybackError) return;
         if (data.fatal) {
           log('❌ HLS fatal error: ' + data.type);
           console.error('[SupremeIPTV] HLS fatal', data);
-          refreshLiveStream('Fatal HLS error');
+          scheduleReconnect(3000, 'Fatal HLS error');
         }
       });
-      activePlayer = h;
-      startHeartbeat();
+      try {
+        h.attachMedia(video);
+        h.loadSource(url);
+      } catch (e) {
+        scheduleReconnect(3000, 'HLS initialization failed');
+      }
     }
 
     /* ── Cast LOAD interceptor ────────────────────────────────────── */
@@ -461,8 +546,22 @@
         log(loadLabel);
         console.log('[SupremeIPTV] LOAD  url=' + rawUrl + '  ct=' + ct + '  channel=' + channelName);
 
-      // Reset reconnect counter for new channel
-      reconnectCount = 0;
+        destroyPlayer();
+        terminalPlaybackError = false;
+        reconnectCount = 0;
+        currentLiveOriginalUrl = '';
+        currentLiveMode = null;
+        expectsVideo = !ct.startsWith('audio/');
+        setBuffering(false);
+        showSwitching(channelName);
+
+        // Explicit HLS takes priority over the generic stream proxy route.
+        let innerUrl = '';
+        try { innerUrl = new URL(rawUrl).searchParams.get('url') || ''; } catch (e) {}
+        if (/\.m3u8($|\?)/i.test(rawUrl) || ct.includes('mpegurl') || /\.m3u8($|\?)/i.test(innerUrl)) {
+          playHls(rawUrl, originalLiveUrl || rawUrl);
+          return null;
+        }
 
         // CF proxy URLs (/api/stream?url=...) are always live MPEG-TS regardless
         // of extension — the CDN URL often has no extension (e.g. /live/play/TOKEN/20170).
@@ -480,12 +579,6 @@
           return null; // We own playback — bypass CAF
         }
 
-        // ── HLS (.m3u8 or application/*mpegurl) ───────────────────
-        if (/\.m3u8($|\?)/i.test(rawUrl) || ct.includes('mpegurl')) {
-          playHls(rawUrl, originalLiveUrl || rawUrl);
-          return null; // We own playback — bypass CAF
-        }
-
         // ── Anything else (HTTP/HTTPS mp4, mkv, avi, webm) — delegate to CAF ──────
         // MUST destroy any active mpegts.js/HLS.js player first.
         // If a live stream was playing, it holds the <video> element.
@@ -500,51 +593,46 @@
 
     /* ── Video events ─────────────────────────────────────────────── */
     video.addEventListener('playing', () => {
-      if (startupWatchdogTimer) {
-        clearTimeout(startupWatchdogTimer);
-        startupWatchdogTimer = null;
-      }
-      // Reset reconnect counter every time we successfully start playing.
-      // This means MAX_RECONNECTS is "5 consecutive failures", not "5 total
-      // over the lifetime of the session". Without this, a stream that drops
-      // and reconnects 5 times over ~5 minutes gives up permanently.
-      reconnectCount = 0;
-      overlay.classList.add('hidden');
-      hideSwitching();
-      setBuffering(false);
+      if (terminalPlaybackError) return;
+      // Custom players are healthy only when the clock advances WITH video.
+      if (currentLiveMode) return;
+      markPlaybackHealthy();
       showNowPlaying(currentChannel);
       logThenHide('✅ Playing', 3000);
     });
     video.addEventListener('waiting', () => {
+      if (terminalPlaybackError) return;
       setBuffering(true);
       log('⏳ Buffering…');
     });
     video.addEventListener('stalled', () => {
+      if (terminalPlaybackError) return;
       setBuffering(true);
       log('⚠️ Stream stalled');
     });
     video.addEventListener('canplay', () => {
+      if (terminalPlaybackError || currentLiveMode) return;
       overlay.classList.add('hidden');
       setBuffering(false);
     });
     video.addEventListener('ended', () => {
+      if (terminalPlaybackError) return;
+      if (currentLiveMode) {
+        scheduleReconnect(1000, 'Stream ended');
+        return;
+      }
       setBuffering(false);
       overlay.classList.remove('hidden');
       log('Stream ended');
     });
     video.addEventListener('error', () => {
+      if (terminalPlaybackError) return;
       hideSwitching();
       setBuffering(false);
       const msg = video.error ? video.error.message : 'unknown error';
       log('❌ Video error: ' + msg);
 
-      // Live stream error handling:
-      //   mpegts.js active (activePlayer set) → let mpegts.js handle via Events.ERROR
-      //   video.src active (activePlayer null) → schedule reconnect here
-      if (currentLiveMode && activePlayer) {
-        log('ℹ️ Video error while mpegts.js active — letting it handle reconnect');
-        return;
-      }
+      // Some decoder errors only reach the element, not the JS player.
       if (currentLiveMode) {
         log('🔄 Live stream error — scheduling reconnect');
         scheduleReconnect(3000, 'Stream error');
