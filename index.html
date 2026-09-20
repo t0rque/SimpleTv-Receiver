@@ -566,7 +566,11 @@
         let innerUrl = '';
         try { innerUrl = new URL(rawUrl).searchParams.get('url') || ''; } catch (e) {}
         const explicitHlsUrl = /\.m3u8($|\?)/i.test(rawUrl) || /\.m3u8($|\?)/i.test(innerUrl);
-        const shouldUseHls = explicitHlsUrl || (!isBufferedStream && ct.includes('mpegurl'));
+        const isProxyUrl = rawUrl.includes('/api/stream');
+        const explicitHlsMime = ct.includes('application/vnd.apple.mpegurl');
+        // Some live MPEG-TS proxy URLs arrive with mpegurl MIME from sender defaults.
+        // For proxy URLs, only choose HLS when URL explicitly indicates .m3u8.
+        const shouldUseHls = explicitHlsUrl || (!isBufferedStream && ct.includes('mpegurl') && (!isProxyUrl || explicitHlsMime));
         if (shouldUseHls) {
           playHls(rawUrl, originalLiveUrl || rawUrl);
           return null;
