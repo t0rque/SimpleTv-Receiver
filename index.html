@@ -211,10 +211,10 @@
     }
 
     /* ── Channel-switching overlay ───────────────────────────────── */
-    function showSwitching(channelName) {
+    function showSwitching(channelName, subtitle = 'Switching channel') {
       currentChannel = channelName || 'Loading…';
       switchChName.textContent = currentChannel;
-      switchChSub.textContent = 'Switching channel';
+      switchChSub.textContent = subtitle;
       switchChSub.classList.remove('error');
       switchOverlay.classList.remove('error-mode');
       switchOverlay.classList.add('visible');
@@ -540,6 +540,13 @@
         const ct     = (media.contentType || '').toLowerCase();
         const customData = media.customData || {};
         const originalLiveUrl = (customData.originalLiveUrl || '').trim();
+        const isBufferedStream = String(media.streamType || '').toUpperCase().includes('BUFFERED');
+        const isVodByContentType =
+          ct.startsWith('video/mp4') ||
+          ct.includes('matroska') ||
+          ct.includes('x-msvideo') ||
+          ct === 'video/webm' ||
+          ct === 'application/dash+xml';
 
         const channelName = loadRequestData.media?.metadata?.title || '';
         const loadLabel = channelName ? ('📥 Loading: ' + channelName) : ('📥 LOAD: ' + rawUrl.substring(0, 80));
@@ -553,7 +560,7 @@
         currentLiveMode = null;
         expectsVideo = !ct.startsWith('audio/');
         setBuffering(false);
-        showSwitching(channelName);
+        showSwitching(channelName, isBufferedStream ? 'Loading video' : 'Switching channel');
 
         // Explicit HLS takes priority over the generic stream proxy route.
         let innerUrl = '';
@@ -570,8 +577,9 @@
         if (rawUrl.includes('/api/stream')) {
           try {
             const proxiedUrl = new URL(rawUrl).searchParams.get('url') || '';
-            isLiveProxy = !/\.(mp4|mkv|avi|webm)($|\?)/i.test(proxiedUrl);
-          } catch(e) { isLiveProxy = true; }
+            const proxiedLooksVod = /\.(mp4|mkv|avi|webm|mpd)($|\?)/i.test(proxiedUrl);
+            isLiveProxy = !isVodByContentType && !proxiedLooksVod;
+          } catch(e) { isLiveProxy = !isVodByContentType; }
         }
         if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || isLiveProxy) {
           log('📡 MPEG-TS live stream → mpegts.js');
@@ -586,6 +594,7 @@
         currentLiveOriginalUrl = '';
         currentLiveMode = null;
         destroyPlayer();
+        hideSwitching();
         log('📦 Delegating to CAF player: ' + rawUrl.substring(0, 60));
         return loadRequestData;
       }
