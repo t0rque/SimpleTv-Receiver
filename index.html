@@ -549,6 +549,7 @@
           ct === 'application/dash+xml';
 
         const channelName = loadRequestData.media?.metadata?.title || '';
+        const mediaLabel = channelName || (isBufferedStream ? 'Video' : 'Channel');
         const loadLabel = channelName ? ('📥 Loading: ' + channelName) : ('📥 LOAD: ' + rawUrl.substring(0, 80));
         log(loadLabel);
         console.log('[SupremeIPTV] LOAD  url=' + rawUrl + '  ct=' + ct + '  channel=' + channelName);
@@ -560,7 +561,7 @@
         currentLiveMode = null;
         expectsVideo = !ct.startsWith('audio/');
         setBuffering(false);
-        showSwitching(channelName, isBufferedStream ? 'Loading video' : 'Switching channel');
+        showSwitching(mediaLabel, isBufferedStream ? 'Loading video' : 'Switching channel');
 
         // Explicit HLS takes priority over the generic stream proxy route.
         let innerUrl = '';
@@ -600,11 +601,33 @@
         currentLiveOriginalUrl = '';
         currentLiveMode = null;
         destroyPlayer();
-        hideSwitching();
+        // CAF VOD startup can take time; keep explicit transition UI visible
+        // so users don't see the idle "Ready to cast" screen while loading.
+        overlay.classList.add('hidden');
+        setBuffering(true);
+        showSwitching(mediaLabel, 'Loading video');
         log('📦 Delegating to CAF player: ' + rawUrl.substring(0, 60));
         return loadRequestData;
       }
     );
+
+    // CAF path reliability: hide transition UI when CAF reports playback progress.
+    playerManager.addEventListener(cast.framework.events.EventType.PLAYER_LOADING, () => {
+      if (currentLiveMode) return;
+      overlay.classList.add('hidden');
+      setBuffering(true);
+      if (!switchOverlay.classList.contains('visible')) {
+        const mediaInfo = playerManager.getMediaInformation();
+        const title = mediaInfo?.metadata?.title || currentChannel || 'Video';
+        showSwitching(title, 'Loading video');
+      }
+    });
+
+    playerManager.addEventListener(cast.framework.events.EventType.PLAYER_LOAD_COMPLETE, () => {
+      if (currentLiveMode) return;
+      markPlaybackHealthy();
+      if (currentChannel) showNowPlaying(currentChannel);
+    });
 
     /* ── Video events ─────────────────────────────────────────────── */
     video.addEventListener('playing', () => {
