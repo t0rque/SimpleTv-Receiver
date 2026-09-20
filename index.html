@@ -565,7 +565,9 @@
         // Explicit HLS takes priority over the generic stream proxy route.
         let innerUrl = '';
         try { innerUrl = new URL(rawUrl).searchParams.get('url') || ''; } catch (e) {}
-        if (/\.m3u8($|\?)/i.test(rawUrl) || ct.includes('mpegurl') || /\.m3u8($|\?)/i.test(innerUrl)) {
+        const explicitHlsUrl = /\.m3u8($|\?)/i.test(rawUrl) || /\.m3u8($|\?)/i.test(innerUrl);
+        const shouldUseHls = explicitHlsUrl || (!isBufferedStream && ct.includes('mpegurl'));
+        if (shouldUseHls) {
           playHls(rawUrl, originalLiveUrl || rawUrl);
           return null;
         }
@@ -574,14 +576,14 @@
         // of extension — the CDN URL often has no extension (e.g. /live/play/TOKEN/20170).
         // Must detect these via the path, not just the .ts extension.
         let isLiveProxy = false;
-        if (rawUrl.includes('/api/stream')) {
+        if (!isBufferedStream && rawUrl.includes('/api/stream')) {
           try {
             const proxiedUrl = new URL(rawUrl).searchParams.get('url') || '';
             const proxiedLooksVod = /\.(mp4|mkv|avi|webm|mpd)($|\?)/i.test(proxiedUrl);
             isLiveProxy = !isVodByContentType && !proxiedLooksVod;
           } catch(e) { isLiveProxy = !isVodByContentType; }
         }
-        if (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || isLiveProxy) {
+        if (!isBufferedStream && (/\.ts($|\?)/i.test(rawUrl) || ct === 'video/mp2t' || isLiveProxy)) {
           log('📡 MPEG-TS live stream → mpegts.js');
           playMpegTs(rawUrl, originalLiveUrl || rawUrl);
           return null; // We own playback — bypass CAF
