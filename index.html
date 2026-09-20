@@ -165,6 +165,7 @@
     let liveRefreshTimer = null;
     let currentLiveOriginalUrl = '';
     let currentLiveMode = null;
+    let hlsFallbackTried = false;
     const LIVE_REFRESH_MS = 4 * 60 * 1000;
 
     // ── Heartbeat — keeps Cast session alive when PlayerManager is IDLE ──
@@ -401,6 +402,19 @@
     function scheduleReconnect(delayMs, reason) {
       if (terminalPlaybackError || !currentLiveMode) return;
       if (reconnectTimer) return; // already scheduled
+
+      // One-time escape hatch: after repeated MPEG-TS startup stalls, try HLS variant.
+      if (!hlsFallbackTried && currentLiveMode === 'mpegts' && reconnectCount >= 2) {
+        const fallback = buildHlsFallbackUrl(currentLiveOriginalUrl);
+        if (fallback) {
+          hlsFallbackTried = true;
+          log('↩️ ' + reason + ' — trying HLS fallback once');
+          showSwitching(currentChannel || 'Channel', 'Trying compatibility fallback');
+          playHls(fallback, currentLiveOriginalUrl || fallback);
+          return;
+        }
+      }
+
       if (reconnectCount >= MAX_RECONNECTS) {
         showPlaybackError('Unable to play this stream after several attempts. Select the channel again to request a fresh stream.');
         return;
@@ -412,6 +426,27 @@
         reconnectTimer = null;
         refreshLiveStream('Reconnect after stream failure');
       }, delayMs);
+    }
+
+    function buildHlsFallbackUrl(sourceUrl) {
+      if (!sourceUrl) return '';
+      try {
+        if (/\.m3u8($|\?)/i.test(sourceUrl)) return sourceUrl;
+        const outer = new URL(sourceUrl);
+        if (outer.pathname === '/api/stream') {
+          const inner = outer.searchParams.get('url') || '';
+          if (!inner || !/\.ts($|\?)/i.test(inner)) return '';
+          const swappedInner = inner.replace(/\.ts($|\?)/i, '.m3u8$1');
+          outer.searchParams.set('url', swappedInner);
+          return outer.toString();
+        }
+        if (/\.ts($|\?)/i.test(sourceUrl)) {
+          return sourceUrl.replace(/\.ts($|\?)/i, '.m3u8$1');
+        }
+      } catch (_) {
+        if (/\.ts($|\?)/i.test(sourceUrl)) return sourceUrl.replace(/\.ts($|\?)/i, '.m3u8$1');
+      }
+      return '';
     }
 
     /* ── MPEG-TS live streams — mpegts.js via CF proxy ──────────────────
@@ -449,6 +484,16 @@
         if (activePlayer !== p || terminalPlaybackError) return;
         log('❌ mpegts error: ' + errType + ' / ' + errDetail);
         if (errDetail === mpegts.ErrorDetails.MEDIA_CODEC_UNSUPPORTED) {
+          if (!hlsFallbackTried) {
+            const fallback = buildHlsFallbackUrl(currentLiveOriginalUrl || url);
+            if (fallback) {
+              hlsFallbackTried = true;
+              log('↩️ Unsupported TS codec — trying HLS fallback once');
+              showSwitching(currentChannel || 'Channel', 'Trying compatibility fallback');
+              playHls(fallback, currentLiveOriginalUrl || fallback);
+              return;
+            }
+          }
           showPlaybackError('This stream uses a codec that this Cast device cannot play. Try an H.264/AAC channel version.');
         } else {
           scheduleReconnect(3000, 'Stream error');
@@ -556,6 +601,7 @@
 
         destroyPlayer();
         terminalPlaybackError = false;
+        hlsFallbackTried = false;
         reconnectCount = 0;
         currentLiveOriginalUrl = '';
         currentLiveMode = null;
