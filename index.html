@@ -158,8 +158,8 @@
     let playerGeneration = 0;
     let terminalPlaybackError = false;
     let expectsVideo = true;
-    const STARTUP_TIMEOUT_MS = 25000;
-    const STALL_TIMEOUT_MS = 20000;
+    const STARTUP_TIMEOUT_MS = 9000;
+    const STALL_TIMEOUT_MS = 10000;
     let reconnectCount   = 0;    // reset on each new channel load
     let currentChannel   = '';
     let liveRefreshTimer = null;
@@ -211,6 +211,20 @@
       }
     }
 
+    // Send receiver-side playback state back to sender so cast success reflects
+    // actual frame progress instead of only LOAD acceptance.
+    function emitReceiverStatus(type, extra = {}) {
+      try {
+        context.sendCustomMessage(HEARTBEAT_NS, undefined, {
+          type,
+          ts: Date.now(),
+          channel: currentChannel || '',
+          mode: currentLiveMode || 'caf',
+          ...extra,
+        });
+      } catch (_) {}
+    }
+
     /* ── Channel-switching overlay ───────────────────────────────── */
     function showSwitching(channelName, subtitle = 'Switching channel') {
       currentChannel = channelName || 'Loading…';
@@ -245,6 +259,7 @@
     function showPlaybackError(message) {
       if (terminalPlaybackError) return;
       terminalPlaybackError = true;
+      emitReceiverStatus('playback_error', { message });
       if (startupWatchdogTimer) { clearTimeout(startupWatchdogTimer); startupWatchdogTimer = null; }
       if (playbackWatchdogTimer) { clearInterval(playbackWatchdogTimer); playbackWatchdogTimer = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -302,7 +317,10 @@
         lastTime = video.currentTime;
         const hasPicture = !expectsVideo || (video.videoWidth > 0 && video.videoHeight > 0);
         if (advancing && hasPicture) {
-          if (!hasStarted) showNowPlaying(currentChannel);
+          if (!hasStarted) {
+            showNowPlaying(currentChannel);
+            emitReceiverStatus('playback_started', { position: video.currentTime });
+          }
           hasStarted = true;
           lastProgressAt = now;
           markPlaybackHealthy();
@@ -672,6 +690,7 @@
     playerManager.addEventListener(cast.framework.events.EventType.PLAYER_LOAD_COMPLETE, () => {
       if (currentLiveMode) return;
       markPlaybackHealthy();
+      emitReceiverStatus('playback_started', { position: video.currentTime });
       if (currentChannel) showNowPlaying(currentChannel);
     });
 
@@ -681,6 +700,7 @@
       // Custom players are healthy only when the clock advances WITH video.
       if (currentLiveMode) return;
       markPlaybackHealthy();
+      emitReceiverStatus('playback_started', { position: video.currentTime });
       showNowPlaying(currentChannel);
       logThenHide('✅ Playing', 3000);
     });
