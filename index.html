@@ -762,8 +762,16 @@
     //   NOTE: idleTimeoutMs is NOT a real CastReceiverOptions property — docs only
     //   list disableIdleTimeout for this purpose.
     // maxInactivity: 600 — 10 min before closing if phone disconnects (default 10s).
-    context.addCustomMessageListener(HEARTBEAT_NS, () => {
+    context.addCustomMessageListener(HEARTBEAT_NS, (event) => {
+      const msg = event?.data || {};
       // Phone ping received — session is alive
+      if (msg.type === 'sender_status') {
+        const status = String(msg.message || 'Preparing stream...');
+        overlay.classList.add('hidden');
+        showSwitching(currentChannel || 'Loading channel…', status);
+        setBuffering(true);
+        log('📲 ' + status);
+      }
     });
     context.start({ disableIdleTimeout: true, maxInactivity: 600 });
     log('✅ SimpleTv Receiver ready  (35D1A927)');
